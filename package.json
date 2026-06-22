@@ -1,0 +1,32 @@
+{
+  "name": "new-qp3d",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.0.0",
+  "pnpm": {
+    "overrides": {
+      "@zip.js/zip.js": "2.7.53"
+    }
+  },
+  "scripts": {
+    "typecheck": "pnpm --filter @new-qp3d/shared build && pnpm -r typecheck",
+    "test": "vitest run",
+    "test:pipeline": "vitest run packages/pipeline/tests",
+    "test:api": "vitest run apps/api/tests",
+    "test:web": "vitest run apps/web/tests",
+    "e2e": "playwright test",
+    "build:pipeline": "pnpm --filter @new-qp3d/pipeline build",
+    "build:api": "pnpm --filter @new-qp3d/api build",
+    "build:web": "pnpm --filter @new-qp3d/web build",
+    "smoke:sample": "node scripts/smoke-build-sample.mjs",
+    "dev:web": "pnpm --filter @new-qp3d/web dev",
+    "dev:api": "pnpm --filter @new-qp3d/api dev"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

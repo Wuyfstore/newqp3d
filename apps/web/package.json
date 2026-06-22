@@ -1,0 +1,22 @@
+{
+  "name": "@new-qp3d/web",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run tests"
+  },
+  "dependencies": {
+    "@new-qp3d/shared": "workspace:*",
+    "cesium": "1.117.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vite": "^7.3.5",
+    "vitest": "^3.2.0"
+  }
+}

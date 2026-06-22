@@ -1,0 +1,24 @@
+{
+  "versionId": "network-sample",
+  "createdAt": "2026-06-21T15:00:00.000Z",
+  "totalLines": 2,
+  "totalPoints": 4,
+  "generatedLineFeatures": 2,
+  "generatedPointFeatures": 4,
+  "flags": [],
+  "flagCounts": {},
+  "groupCounts": {
+    "gwlx": {
+      "雨水管": 1,
+      "污水管": 1,
+      "雨水篦": 1,
+      "污水篦": 1,
+      "进水口": 1,
+      "检查井": 1
+    },
+    "gs": {
+      "市政": 4,
+      "小区": 2
+    }
+  }
+}

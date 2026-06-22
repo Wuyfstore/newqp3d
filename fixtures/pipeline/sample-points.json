@@ -1,0 +1,34 @@
+[
+  {
+    "guid": "sample-rain-grate-1",
+    "code": "P1",
+    "type": "rain-grate",
+    "gwlx": "雨水篦",
+    "gs": "市政",
+    "coordinates": [5, 0]
+  },
+  {
+    "guid": "sample-sewage-grate-1",
+    "code": "P2",
+    "type": "sewage-grate",
+    "gwlx": "污水篦",
+    "gs": "小区",
+    "coordinates": [5, 10]
+  },
+  {
+    "guid": "sample-inlet-1",
+    "code": "P3",
+    "type": "inlet",
+    "gwlx": "进水口",
+    "gs": "市政",
+    "coordinates": [10, 0]
+  },
+  {
+    "guid": "sample-well-1",
+    "code": "P4",
+    "type": "well",
+    "gwlx": "检查井",
+    "gs": "市政",
+    "coordinates": [20, 0]
+  }
+]

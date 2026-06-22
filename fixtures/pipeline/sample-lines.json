@@ -1,0 +1,22 @@
+[
+  {
+    "guid": "sample-rain-1",
+    "qdbm": "N1",
+    "zdbm": "N2",
+    "gwlx": "雨水管",
+    "gs": "市政",
+    "cz": "砼",
+    "gg": "300",
+    "coordinates": [[0, 0], [20, 0]]
+  },
+  {
+    "guid": "sample-sewage-1",
+    "qdbm": "N3",
+    "zdbm": "N4",
+    "gwlx": "污水管",
+    "gs": "小区",
+    "cz": "PE",
+    "gg": "200X200",
+    "coordinates": [[0, 10], [20, 10]]
+  }
+]
