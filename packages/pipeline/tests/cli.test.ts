@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import type { PipeLineRawRow, PointFacilityRawRow } from '@new-qp3d/shared'
 import type { Mesh } from '../src/geometry/pipeMesh.js'
 
+import { createReferenceBuildTemplate } from '@new-qp3d/shared'
 import { describe, expect, it } from 'vitest'
 import { buildPostgisOverview, buildSample, createSampleMesh } from '../src/cli.js'
 
@@ -315,6 +316,183 @@ describe('buildPostgisOverview', () => {
 
     expect(tileset.root.children.length).toBeGreaterThan(1)
   })
+
+  it('uses template flow rules, defaults, and radial segments while building line features', async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-postgis-template-options-'))
+    const template = createReferenceBuildTemplate()
+    template.defaults = {
+      ...template.defaults,
+      pipeDiameterMm: 900,
+      depthM: 1.25,
+      pointSizeM: 2.4,
+      surfaceElevationM: 20,
+    }
+    template.flowRule = {
+      field: 'direction',
+      forwardValues: ['F'],
+      reverseValues: ['R'],
+      unknownStrategy: 'forward',
+    }
+    template.lod = {
+      ...template.lod,
+      radialSegments: 8,
+    }
+    const dataSource = {
+      async *readLines(): AsyncIterable<PipeLineRawRow> {
+        yield {
+          guid: 'line-template-options',
+          qdbm: 'A',
+          zdbm: 'B',
+          cz: null,
+          dmcc: 900,
+          gg: '',
+          qdms: null,
+          zdms: null,
+          qdndbg: null,
+          zdndbg: null,
+          gwlx: '合流管',
+          gs: '市政',
+          msfs: null,
+          lx: 'F',
+          gdsx: null,
+          gdcd: null,
+          geomWkbHex: lineStringEwkb([[119.38, 31.57], [119.381, 31.57]], 4326),
+        }
+      },
+      async *readPoints(): AsyncIterable<PointFacilityRawRow> {
+        yield {
+          gdbm: 'point-template-options',
+          hzb: null,
+          zzb: null,
+          lbmc: '检查井',
+          dmbg: 20,
+          kj: null,
+          js: null,
+          ms: null,
+          gg: null,
+          jgcz: null,
+          jgxz: null,
+          jgcc: null,
+          tag: null,
+          geomWkbHex: pointEwkb([119.3805, 31.5705], 4326),
+        }
+      },
+    }
+
+    await buildPostgisOverview({
+      outputRoot,
+      version: 'network-template-options',
+      dataSource,
+      expectedSrid: 4326,
+      template,
+    })
+
+    const metadata = JSON.parse(
+      await readFile(join(outputRoot, 'network-template-options', 'metadata.json'), 'utf8'),
+    ) as {
+      features: Array<{
+        businessId: string
+        properties: Record<string, unknown>
+      }>
+    }
+    const tileset = JSON.parse(
+      await readFile(join(outputRoot, 'network-template-options', 'tileset.json'), 'utf8'),
+    ) as {
+      root: {
+        children: Array<{ content?: { uri: string } }>
+      }
+    }
+    const tileUris = tileset.root.children
+      .map(child => child.content?.uri)
+      .filter((uri): uri is string => uri !== undefined)
+    const lineTileUri = tileUris[0]
+    if (!lineTileUri)
+      throw new Error('Expected tile content')
+
+    const lineMesh = readGlbMesh(await readFile(join(outputRoot, 'network-template-options', lineTileUri)))
+    expect(metadata.features[0]).toEqual(expect.objectContaining({
+      businessId: 'line-template-options',
+      properties: expect.objectContaining({
+        flowDirection: 'qdbm-to-zdbm',
+        gg: '900',
+        heightQuality: 'defaulted',
+      }),
+    }))
+    expect(featureVertexCount(lineMesh, 0)).toBe(16)
+    const zValues = meshFeatureAxisValues(lineMesh, 0, 2)
+    expect(Math.max(...zValues) - Math.min(...zValues)).toBeCloseTo(0.9, 1)
+    const childMeshes = await Promise.all(
+      tileUris.map(async uri => readGlbMesh(await readFile(join(outputRoot, 'network-template-options', uri)))),
+    )
+    const pointMesh = childMeshes.find(mesh => featureVertexCount(mesh, 1) > 0)
+    if (!pointMesh)
+      throw new Error('Expected point mesh')
+    const pointXs = meshFeatureAxisValues(pointMesh, 1, 0)
+    expect(Math.max(...pointXs) - Math.min(...pointXs)).toBeCloseTo(2.4, 1)
+  })
+
+  it('disables line flow animation when template unknown strategy is unknown', async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-postgis-template-unknown-flow-'))
+    const template = createReferenceBuildTemplate()
+    template.flowRule = {
+      field: 'direction',
+      forwardValues: ['F'],
+      reverseValues: ['R'],
+      unknownStrategy: 'unknown',
+    }
+    const dataSource = {
+      async *readLines(): AsyncIterable<PipeLineRawRow> {
+        yield {
+          guid: 'line-unknown-flow',
+          qdbm: 'A',
+          zdbm: 'B',
+          cz: null,
+          dmcc: null,
+          gg: 'DN300',
+          qdms: null,
+          zdms: null,
+          qdndbg: 10,
+          zdndbg: 10,
+          gwlx: '污水管',
+          gs: '市政',
+          msfs: null,
+          lx: 'X',
+          gdsx: null,
+          gdcd: null,
+          geomWkbHex: lineStringEwkb([[119.38, 31.57], [119.381, 31.57]], 4326),
+        }
+      },
+      async *readPoints(): AsyncIterable<PointFacilityRawRow> {},
+    }
+
+    await buildPostgisOverview({
+      outputRoot,
+      version: 'network-template-unknown-flow',
+      dataSource,
+      expectedSrid: 4326,
+      template,
+    })
+
+    const metadata = JSON.parse(
+      await readFile(join(outputRoot, 'network-template-unknown-flow', 'metadata.json'), 'utf8'),
+    ) as {
+      features: Array<{
+        properties: Record<string, unknown>
+      }>
+    }
+    const tileset = JSON.parse(
+      await readFile(join(outputRoot, 'network-template-unknown-flow', 'tileset.json'), 'utf8'),
+    ) as {
+      root: { children: Array<{ content?: { uri: string } }> }
+    }
+    const tileUri = tileset.root.children[0]?.content?.uri
+    if (!tileUri)
+      throw new Error('Expected tile content')
+
+    const mesh = readGlbMesh(await readFile(join(outputRoot, 'network-template-unknown-flow', tileUri)))
+    expect(metadata.features[0]?.properties.flowDirection).toBe('unknown')
+    expect(mesh.texcoords?.[1]).toBe(-1)
+  })
 })
 
 function totalTriangleArea(mesh: Mesh): number {
@@ -339,6 +517,15 @@ function vertex(mesh: Mesh, index: number): [number, number, number] {
 
 function featureVertexCount(mesh: Mesh, featureId: number): number {
   return mesh.featureIds.filter(id => id === featureId).length
+}
+
+function meshFeatureAxisValues(mesh: Mesh, featureId: number, axis: 0 | 1 | 2): number[] {
+  const values: number[] = []
+  for (let vertexIndex = 0; vertexIndex < mesh.featureIds.length; vertexIndex += 1) {
+    if (mesh.featureIds[vertexIndex] === featureId)
+      values.push(mesh.positions[vertexIndex * 3 + axis] ?? 0)
+  }
+  return values
 }
 
 function triangleArea(a: [number, number, number], b: [number, number, number], c: [number, number, number]): number {

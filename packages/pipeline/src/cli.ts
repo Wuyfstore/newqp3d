@@ -3,14 +3,14 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import type { PipeLineRawRow, PointFacilityRawRow } from '@new-qp3d/shared'
+import type { BuildTemplate, PipeLineRawRow, PointFacilityRawRow } from '@new-qp3d/shared'
 import type { Mesh } from './geometry/mesh.js'
 import type { SridCount } from './datasource/postgis.js'
 import type { QualityReportInput, SridValidationReport } from './quality/report.js'
 import type { PipelineConfig } from './config.js'
 import type { BoundingVolumeBox, FeatureMetadata, TilesetChildInput } from './tiles/tilesetWriter.js'
 
-import { getPipeColor } from '@new-qp3d/shared'
+import { assertValidBuildTemplate, getPipeColor } from '@new-qp3d/shared'
 import { loadPipelineConfig } from './config.js'
 import { PostgisDataSource } from './datasource/postgis.js'
 import { createGeoReference, sourceCoordinateToWgs84, type GeoReference, type Wgs84Position } from './geometry/georeference.js'
@@ -22,6 +22,7 @@ import { computePipeCenterHeights } from './normalize/height.js'
 import { parsePipeSpec } from './normalize/spec.js'
 import { publishVersion, validatePublishedVersion } from './publish/versionStore.js'
 import { createQualityReport } from './quality/report.js'
+import { pipelineConfigFromBuildTemplate } from './templateMapping.js'
 import { writeFeatureMetadataSidecar, writeGlb } from './tiles/glbWriter.js'
 import { writeTileset } from './tiles/tilesetWriter.js'
 
@@ -64,6 +65,7 @@ interface BuildPostgisOverviewInput {
   limit?: number
   expectedSrid?: number
   tileOptions?: Partial<TileBuildOptions>
+  template?: BuildTemplate
 }
 
 interface BuildFeature {
@@ -76,6 +78,21 @@ interface TileBuildOptions {
   maxFeaturesPerTile: number
   maxDepth: number
   maxTileBytes: number
+  radialSegments: number
+}
+
+interface LineParseOptions {
+  expectedSrid: number
+  defaultPipeDiameterMm: number
+  defaultDepthMeters: number
+  defaultSurfaceElevationMeters: number
+  flowRule?: BuildTemplate['flowRule']
+}
+
+type FlowDirection = 'qdbm-to-zdbm' | 'zdbm-to-qdbm' | 'unknown'
+
+interface PointBuildOptions {
+  defaultPointSizeMeters: number
 }
 
 interface FeatureBounds {
@@ -177,7 +194,7 @@ async function build(options: Record<string, string | boolean>): Promise<void> {
   const outputRoot = outputOption ?? process.env.QP3D_OUTPUT_ROOT ?? 'data/tiles'
 
   if (source === 'postgis') {
-    const config = loadPipelineConfig(outputOption === undefined ? {} : { QP3D_OUTPUT_ROOT: outputOption })
+    const config = await loadPostgisBuildConfig(options, outputOption)
     const published = await buildPostgis(config)
     console.log(JSON.stringify(published.latest, null, 2))
     return
@@ -196,7 +213,37 @@ async function buildPostgis(config: PipelineConfig) {
     outputRoot: resolve(config.outputRoot),
     dataSource: new PostgisDataSource(config),
     expectedSrid: config.expectedSrid,
+    ...(config.tileOptions === undefined ? {} : { tileOptions: config.tileOptions }),
+    ...(config.template === undefined ? {} : { template: config.template }),
   })
+}
+
+async function loadPostgisBuildConfig(
+  options: Record<string, string | boolean>,
+  outputOption: string | undefined,
+): Promise<PipelineConfig> {
+  const baseConfig = loadPipelineConfig(outputOption === undefined ? {} : { QP3D_OUTPUT_ROOT: outputOption })
+  const templateOption = stringOption(options, 'template')
+  if (!templateOption) {
+    return baseConfig
+  }
+
+  const template = await readBuildTemplateOption(templateOption)
+  return pipelineConfigFromBuildTemplate({
+    databaseUrl: baseConfig.databaseUrl,
+    outputRoot: baseConfig.outputRoot,
+    expectedSrid: baseConfig.expectedSrid,
+    template,
+  })
+}
+
+async function readBuildTemplateOption(value: string): Promise<BuildTemplate> {
+  const source = value.trim().startsWith('{')
+    ? value
+    : await readFile(resolve(value), 'utf8')
+  const parsed = JSON.parse(source) as unknown
+  assertValidBuildTemplate(parsed)
+  return parsed
 }
 
 async function validate(options: Record<string, string | boolean>): Promise<void> {
@@ -249,6 +296,12 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
   const version = input.version ?? `network-${formatVersionDate(new Date())}`
   const expectedSrid = input.expectedSrid ?? 3857
   const sridValidation = await createSridValidation(input.dataSource, expectedSrid)
+  const tileOptions = normalizeTileBuildOptions({
+    ...templateTileOptions(input.template),
+    ...input.tileOptions,
+  })
+  const lineParseOptions = createLineParseOptions(expectedSrid, input.template)
+  const pointBuildOptions = createPointBuildOptions(input.template)
   const parsedLines: ParsedLineFeature[] = []
   const parsedPoints: ParsedPointFeature[] = []
   const flags: Array<{ featureId: string, flag: string }> = []
@@ -258,7 +311,7 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
   for await (const line of input.dataSource.readLines(input.limit)) {
     totalLines += 1
     try {
-      const result = parseLineFeature(line, parsedLines.length + parsedPoints.length + 1, input.expectedSrid)
+      const result = parseLineFeature(line, parsedLines.length + parsedPoints.length + 1, lineParseOptions)
       parsedLines.push(result)
       flags.push(...result.flags.map(flag => ({ featureId: line.guid, flag })))
     } catch {
@@ -279,11 +332,11 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
 
   const geoReference = createBuildGeoReference(parsedLines, parsedPoints)
   const features = [
-    ...parsedLines.map(line => buildLineFeature(line, geoReference)),
-    ...parsedPoints.map(point => buildPointFeature(point, geoReference)),
+    ...parsedLines.map(line => buildLineFeature(line, geoReference, tileOptions)),
+    ...parsedPoints.map(point => buildPointFeature(point, geoReference, pointBuildOptions)),
   ]
   const metadata = features.map(({ metadata }) => metadata)
-  const tiledFeatures = createTiledFeatureFiles(features, normalizeTileBuildOptions(input.tileOptions))
+  const tiledFeatures = createTiledFeatureFiles(features, tileOptions)
   const tilesetInput = {
     assetVersion: '1.1',
     geometricError: 500,
@@ -351,20 +404,32 @@ function countSridRows(counts: SridCount[]): number {
   return counts.reduce((sum, { count }) => sum + count, 0)
 }
 
-function parseLineFeature(line: PipeLineRawRow, featureId: number, expectedSrid = 3857): ParsedLineFeature {
+function createLineParseOptions(expectedSrid: number, template: BuildTemplate | undefined): LineParseOptions {
+  return {
+    expectedSrid,
+    defaultPipeDiameterMm: template?.defaults.pipeDiameterMm ?? 300,
+    defaultDepthMeters: template?.defaults.depthM ?? 2.5,
+    defaultSurfaceElevationMeters: template?.defaults.surfaceElevationM ?? 0,
+    ...(template?.flowRule === undefined ? {} : { flowRule: template.flowRule }),
+  }
+}
+
+function parseLineFeature(line: PipeLineRawRow, featureId: number, options: LineParseOptions): ParsedLineFeature {
   const geometry = parseWkbGeometry(line.geomWkbHex)
   if (geometry.type !== 'LineString' || geometry.coordinates.length < 2)
     throw new Error('Line row does not contain a valid LineString')
 
-  const spec = parsePipeSpec(line.gg)
+  const rawSpec = nonBlankString(line.gg) ?? diameterSpec(line.dmcc)
+  const spec = parsePipeSpec(rawSpec, options.defaultPipeDiameterMm)
+  const specText = rawSpec
   const heights = computePipeCenterHeights({
     spec,
     qdndbg: finiteOrNull(line.qdndbg),
     zdndbg: finiteOrNull(line.zdndbg),
     qdms: finiteOrNull(line.qdms),
     zdms: finiteOrNull(line.zdms),
-    groundElevation: 0,
-    defaultDepthMeters: 2.5,
+    groundElevation: options.defaultSurfaceElevationMeters,
+    defaultDepthMeters: options.defaultDepthMeters,
   })
   const coordinates = geometry.coordinates.map((coordinate, index) => {
     if (!Number.isFinite(coordinate[0]) || !Number.isFinite(coordinate[1]))
@@ -374,10 +439,10 @@ function parseLineFeature(line: PipeLineRawRow, featureId: number, expectedSrid 
       coordinate[0],
       coordinate[1],
       index === 0 ? heights.startCenterZ : heights.endCenterZ,
-    ], geometry.srid ?? expectedSrid)
+    ], geometry.srid ?? options.expectedSrid)
   })
   const flags = [
-    ...(geometry.srid != null && geometry.srid !== expectedSrid ? ['srid-mismatch'] : []),
+    ...(geometry.srid != null && geometry.srid !== options.expectedSrid ? ['srid-mismatch'] : []),
     ...(spec.quality === 'defaulted' ? ['spec-defaulted'] : []),
     ...(heights.quality === 'defaulted' ? ['height-defaulted'] : []),
     ...(!line.qdbm || !line.zdbm ? ['endpoint-unmatched'] : []),
@@ -400,10 +465,10 @@ function parseLineFeature(line: PipeLineRawRow, featureId: number, expectedSrid 
         pipeType: line.gwlx ?? '未知',
         owner: line.gs ?? '未知',
         lx: line.lx,
-        flowDirection: lineFlowDirection(line.lx),
+        flowDirection: lineFlowDirection(line.lx, options.flowRule),
         qualityStatus,
         cz: line.cz,
-        gg: line.gg,
+        gg: specText,
         gdcd: line.gdcd,
         qdms: line.qdms,
         zdms: line.zdms,
@@ -414,6 +479,19 @@ function parseLineFeature(line: PipeLineRawRow, featureId: number, expectedSrid 
     },
     flags,
   }
+}
+
+function diameterSpec(value: number | null): string | null {
+  return value == null ? null : String(value)
+}
+
+function nonBlankString(value: string | null | undefined): string | null {
+  if (value == null) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? value : null
 }
 
 function parsePointFeature(
@@ -467,8 +545,28 @@ function parsePointFeature(
   }
 }
 
-function lineFlowDirection(lx: unknown): 'qdbm-to-zdbm' | 'zdbm-to-qdbm' {
-  return String(lx ?? '').trim() === '1' ? 'qdbm-to-zdbm' : 'zdbm-to-qdbm'
+function lineFlowDirection(
+  lx: unknown,
+  flowRule: BuildTemplate['flowRule'] | undefined,
+): FlowDirection {
+  const value = String(lx ?? '').trim()
+  if (flowRule) {
+    if (flowRule.forwardValues.includes(value)) {
+      return 'qdbm-to-zdbm'
+    }
+    if (flowRule.reverseValues.includes(value)) {
+      return 'zdbm-to-qdbm'
+    }
+    if (flowRule.unknownStrategy === 'forward') {
+      return 'qdbm-to-zdbm'
+    }
+    if (flowRule.unknownStrategy === 'unknown') {
+      return 'unknown'
+    }
+    return 'zdbm-to-qdbm'
+  }
+
+  return value === '1' ? 'qdbm-to-zdbm' : 'zdbm-to-qdbm'
 }
 
 function finiteOrNull(value: number | null | undefined): number | null {
@@ -511,10 +609,12 @@ function createBuildGeoReference(
   })
 }
 
-function buildLineFeature(line: ParsedLineFeature, geoReference: GeoReference | undefined): BuildFeature {
-  const direction = line.metadata.properties.flowDirection === 'qdbm-to-zdbm'
-    ? 'qdbm-to-zdbm'
-    : 'zdbm-to-qdbm'
+function buildLineFeature(
+  line: ParsedLineFeature,
+  geoReference: GeoReference | undefined,
+  tileOptions: TileBuildOptions,
+): BuildFeature {
+  const direction = meshFlowDirection(line.metadata.properties.flowDirection)
 
   return {
     kind: 'line',
@@ -522,12 +622,22 @@ function buildLineFeature(line: ParsedLineFeature, geoReference: GeoReference | 
       featureId: line.metadata.featureId,
       coordinates: line.coordinates.map(coordinate => toMeshCoordinate(coordinate, geoReference)),
       spec: line.spec,
-      radialSegments: 12,
-      flowDirection: direction,
+      radialSegments: tileOptions.radialSegments,
+      ...(direction === undefined ? {} : { flowDirection: direction }),
       flowColor: pipeTypeColor(line.metadata.properties.pipeType),
     }),
     metadata: line.metadata,
   }
+}
+
+function meshFlowDirection(value: unknown): 'qdbm-to-zdbm' | 'zdbm-to-qdbm' | undefined {
+  if (value === 'qdbm-to-zdbm') {
+    return 'qdbm-to-zdbm'
+  }
+  if (value === 'zdbm-to-qdbm') {
+    return 'zdbm-to-qdbm'
+  }
+  return undefined
 }
 
 function pipeTypeColor(pipeType: unknown): [number, number, number] {
@@ -543,9 +653,19 @@ function pipeTypeColor(pipeType: unknown): [number, number, number] {
   ]
 }
 
-function buildPointFeature(point: ParsedPointFeature, geoReference: GeoReference | undefined): BuildFeature {
+function createPointBuildOptions(template: BuildTemplate | undefined): PointBuildOptions {
+  return {
+    defaultPointSizeMeters: template?.defaults.pointSizeM ?? 0,
+  }
+}
+
+function buildPointFeature(
+  point: ParsedPointFeature,
+  geoReference: GeoReference | undefined,
+  options: PointBuildOptions,
+): BuildFeature {
   const symbol = pointSymbol(point.metadata.properties.pointType)
-  const sizeMeters = pointSymbolSizeMeters(symbol)
+  const sizeMeters = pointFeatureSizeMeters(point, symbol, options)
 
   return {
     kind: 'point',
@@ -557,6 +677,21 @@ function buildPointFeature(point: ParsedPointFeature, geoReference: GeoReference
     })),
     metadata: point.metadata,
   }
+}
+
+function pointFeatureSizeMeters(
+  point: ParsedPointFeature,
+  symbol: Parameters<typeof createNodeMesh>[0]['symbol'],
+  options: PointBuildOptions,
+): number {
+  const explicitSize = finiteOrNull(point.metadata.properties.kj as number | null | undefined)
+  if (explicitSize != null && explicitSize > 0) {
+    return explicitSize
+  }
+  if (options.defaultPointSizeMeters > 0) {
+    return options.defaultPointSizeMeters
+  }
+  return pointSymbolSizeMeters(symbol)
 }
 
 function pointSymbol(value: unknown): Parameters<typeof createNodeMesh>[0]['symbol'] {
@@ -752,6 +887,20 @@ function normalizeTileBuildOptions(options: Partial<TileBuildOptions> | undefine
     maxFeaturesPerTile: Math.max(1, Math.floor(options?.maxFeaturesPerTile ?? 2_000)),
     maxDepth: Math.max(0, Math.floor(options?.maxDepth ?? 8)),
     maxTileBytes: Math.max(1, Math.floor(options?.maxTileBytes ?? 4 * 1024 * 1024)),
+    radialSegments: Math.max(4, Math.floor(options?.radialSegments ?? 12)),
+  }
+}
+
+function templateTileOptions(template: BuildTemplate | undefined): Partial<TileBuildOptions> {
+  if (!template) {
+    return {}
+  }
+
+  return {
+    maxFeaturesPerTile: template.lod.maxFeaturesPerTile,
+    maxDepth: template.lod.maxDepth,
+    maxTileBytes: template.lod.maxTileBytes,
+    radialSegments: template.lod.radialSegments,
   }
 }
 

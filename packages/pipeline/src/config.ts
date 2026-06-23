@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from 'node:path'
 
 import { loadRuntimeConfig, QP3D_WORKSPACE_ROOT } from '@new-qp3d/runtime-config'
+import type { BuildTemplate } from '@new-qp3d/shared'
 
 export interface PipelineConfig {
   databaseUrl: string
@@ -8,6 +9,13 @@ export interface PipelineConfig {
   lineTable: string
   expectedSrid: number
   outputRoot: string
+  template?: BuildTemplate
+  tileOptions?: {
+    maxFeaturesPerTile: number
+    maxDepth: number
+    maxTileBytes: number
+    radialSegments: number
+  }
 }
 
 export interface LoadPipelineConfigOptions {
