@@ -12,7 +12,7 @@ import {
   QUALITY_STATES,
   type LayerState,
 } from './state/layerState'
-import { installPanelStyles, renderEmptyPanel, renderPropertyPanel, renderQualitySummary } from './ui/panels'
+import { installPanelStyles, renderBuildReportsPanel, renderEmptyPanel, renderPropertyPanel } from './ui/panels'
 import { createBuildTaskCenter, type BuildTaskCenter } from './ui/buildTaskCenter'
 import { createTemplateWorkbench, type TemplateWorkbench } from './ui/templateWorkbench'
 
@@ -228,8 +228,8 @@ async function loadLatestVersion(
 ): Promise<LayerHandles> {
   const manifest = await apiClient.getLatestVersion()
   status.textContent = `tileset: ${manifest.version}`
-  void apiClient.getLatestQuality()
-    .then(report => showPanel(propertyPanel, renderQualitySummary(report)))
+  void loadBuildReports(apiClient, manifest.version)
+    .then(reports => showPanel(propertyPanel, renderBuildReportsPanel(reports)))
     .catch(() => {
       // The tileset is still usable when the optional summary is unavailable.
     })
@@ -237,6 +237,15 @@ async function loadLatestVersion(
   const handles = await loadPipeNetworkLayers(viewer, manifest)
   handles.applyState(state.snapshot())
   return handles
+}
+
+async function loadBuildReports(
+  apiClient: ApiClient,
+  version: string,
+): Promise<Parameters<typeof renderBuildReportsPanel>[0]> {
+  const quality = await apiClient.getQualityReport(version)
+  const adaptation = await apiClient.getAdaptationReport(version).catch(() => null)
+  return { quality, adaptation }
 }
 
 function installSearch(

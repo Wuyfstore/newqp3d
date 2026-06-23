@@ -178,7 +178,36 @@ export function createPostgisRepository(options: PostgisRepositoryOptions): ApiR
         return null
       }
 
-      return readJson(join(options.outputRoot, latest.version, 'quality-report.json'))
+      return readVersionReport(options.outputRoot, latest.version, 'quality-report.json')
+    },
+
+    async getVersion(version) {
+      const latest = await readJson<LatestManifest>(join(options.outputRoot, 'latest.json'))
+      if (latest?.version === version) {
+        return latest
+      }
+
+      const safeVersion = validateVersionId(version)
+      const qualityReport = await readJson(join(options.outputRoot, safeVersion, 'quality-report.json'))
+      if (qualityReport == null) {
+        return null
+      }
+
+      return {
+        version: safeVersion,
+        tilesetUrl: `/tiles/${safeVersion}/tileset.json`,
+        metadataUrl: `/tiles/${safeVersion}/metadata.json`,
+        qualityReportUrl: `/tiles/${safeVersion}/quality-report.json`,
+        adaptationReportUrl: `/tiles/${safeVersion}/adaptation-report.json`,
+      }
+    },
+
+    async getQualityReport(version) {
+      return readVersionReport(options.outputRoot, version, 'quality-report.json')
+    },
+
+    async getAdaptationReport(version) {
+      return readVersionReport(options.outputRoot, version, 'adaptation-report.json')
     },
 
     async listSchemas() {
@@ -227,6 +256,18 @@ export function createPostgisRepository(options: PostgisRepositoryOptions): ApiR
       return getTableProfile(pool, schema, table)
     },
   }
+}
+
+function validateVersionId(version: string): string {
+  if (!/^[\w.-]+$/.test(version) || version.includes('..')) {
+    throw new Error('Invalid version id')
+  }
+
+  return version
+}
+
+async function readVersionReport(outputRoot: string, version: string, fileName: string): Promise<unknown | null> {
+  return readJson(join(outputRoot, validateVersionId(version), fileName))
 }
 
 export function createSearchResult(row: SearchRow): SearchResult {

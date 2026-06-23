@@ -148,10 +148,12 @@ describe('buildPostgisOverview', () => {
       version: string
       flowMode?: string
       flowTilesetUrl?: string
+      adaptationReportUrl?: string
     }
     expect(latest.version).toBe('network-test-postgis')
     expect(latest.flowMode).toBe('embedded')
     expect(latest.flowTilesetUrl).toBeUndefined()
+    expect(latest.adaptationReportUrl).toBe('/tiles/network-test-postgis/adaptation-report.json')
     const tileset = JSON.parse(
       await readFile(join(outputRoot, 'network-test-postgis', 'tileset.json'), 'utf8'),
     ) as {
@@ -247,6 +249,14 @@ describe('buildPostgisOverview', () => {
     expect(qualityReport.totalPoints).toBe(1)
     expect(qualityReport.generatedLineFeatures).toBe(1)
     expect(qualityReport.generatedPointFeatures).toBe(1)
+    expect(qualityReport.tileStats).toEqual(expect.objectContaining({
+      count: expect.any(Number),
+      maxBytes: expect.any(Number),
+      averageBytes: expect.any(Number),
+    }))
+    expect(qualityReport.tileStats.count).toBeGreaterThan(0)
+    expect(qualityReport.tileStats.maxBytes).toBeGreaterThan(0)
+    expect(qualityReport.tileStats.averageBytes).toBeGreaterThan(0)
     expect(qualityReport.flagCounts['postgis-placeholder-geometry']).toBeUndefined()
     expect(qualityReport.flagCounts['srid-mismatch']).toBe(2)
     expect(qualityReport.flagCounts['height-defaulted']).toBe(1)

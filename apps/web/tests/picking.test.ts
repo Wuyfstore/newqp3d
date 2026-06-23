@@ -55,6 +55,8 @@ describe('installPicking', () => {
       getPoint: vi.fn(),
       getLatestVersion: vi.fn(),
       getLatestQuality: vi.fn(),
+      getQualityReport: vi.fn(),
+      getAdaptationReport: vi.fn(),
       listSchemas: vi.fn(),
       listTables: vi.fn(),
       getTableProfile: vi.fn(),

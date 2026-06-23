@@ -77,6 +77,9 @@ export interface ApiRepository {
   getPoint(gdbm: string): Promise<unknown | null>
   getLatestVersion(): Promise<unknown | null>
   getLatestQuality(): Promise<unknown | null>
+  getVersion(version: string): Promise<unknown | null>
+  getQualityReport(version: string): Promise<unknown | null>
+  getAdaptationReport(version: string): Promise<unknown | null>
   listSchemas(): Promise<DataSourceSchema[]>
   listTables(schema: string): Promise<DataSourceTable[]>
   getTableProfile(schema: string, table: string): Promise<DataSourceTableProfile>

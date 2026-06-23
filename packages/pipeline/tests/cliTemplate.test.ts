@@ -91,10 +91,17 @@ describe('pipeline CLI template builds', () => {
     })
 
     const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as { version: string }
+    const qualityReport = JSON.parse(
+      await readFile(join(outputRoot, latest.version, 'quality-report.json'), 'utf8'),
+    ) as { templateId?: string, templateVersion?: string }
     const tileset = JSON.parse(await readFile(join(outputRoot, latest.version, 'tileset.json'), 'utf8')) as {
       root: { children: unknown[] }
     }
     expect(tileset.root.children.length).toBeGreaterThan(1)
+    expect(qualityReport).toMatchObject({
+      templateId: template.id,
+      templateVersion: template.version,
+    })
   })
 
   it('uses the requested build version for template PostGIS builds', async () => {

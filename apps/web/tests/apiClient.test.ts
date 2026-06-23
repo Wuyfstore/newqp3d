@@ -61,8 +61,31 @@ describe('api client', () => {
       metadataUrl: '/tiles/v1/metadata.json',
     })
     await expect(api.getLatestQuality()).resolves.toEqual({ version: 'v1', summary: { lineCount: 2 } })
+    await expect(api.getQualityReport('v1')).resolves.toEqual({ version: 'v1', summary: { lineCount: 2 } })
     expect(fetcher).toHaveBeenNthCalledWith(1, '/api/versions/latest')
     expect(fetcher).toHaveBeenNthCalledWith(2, '/api/quality/latest')
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/versions/v1/quality-report')
+  })
+
+  it('loads version-specific adaptation reports', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      versionId: 'network-g9',
+      matchedPoints: 8,
+      sourceCounts: {
+        pointType: { 'topology-degree': 4 },
+        pointSize: { 'adjacent-line': 3 },
+        elevation: { 'line-endpoint': 2 },
+      },
+      examples: [{ pointId: 'P-1', connectedLineIds: ['L-1'] }],
+    })))
+    const api = createApiClient('/api', fetcher)
+
+    await expect(api.getAdaptationReport('network/g9')).resolves.toMatchObject({
+      versionId: 'network-g9',
+      matchedPoints: 8,
+      examples: [{ pointId: 'P-1', connectedLineIds: ['L-1'] }],
+    })
+    expect(fetcher).toHaveBeenCalledWith('/api/versions/network%2Fg9/adaptation-report')
   })
 
   it('loads datasource discovery data and saves build templates', async () => {

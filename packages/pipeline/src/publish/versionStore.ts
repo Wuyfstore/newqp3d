@@ -19,6 +19,7 @@ export interface LatestManifest {
   tilesetUrl: string
   metadataUrl: string
   qualityReportUrl: string
+  adaptationReportUrl?: string
   flowTilesetUrl?: string
   flowMode?: 'embedded'
 }
@@ -82,6 +83,8 @@ function createLatestManifest(version: string, files: Record<string, string | Ui
   }
   if (files['flow/tileset.json'] && files['flow/root.glb'])
     latest.flowTilesetUrl = `/tiles/${version}/flow/tileset.json`
+  if (files['adaptation-report.json'])
+    latest.adaptationReportUrl = `/tiles/${version}/adaptation-report.json`
   if (files['.flow-mode'])
     latest.flowMode = 'embedded'
 

@@ -116,6 +116,11 @@ interface TiledFeatureFiles {
   files: Record<string, string | Uint8Array>
   children: TilesetChildInput[]
   boundingVolume: BoundingVolumeBox
+  tileStats: {
+    count: number
+    maxBytes: number
+    averageBytes: number
+  }
 }
 
 interface ParsedLineFeature {
@@ -361,6 +366,13 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
     : tilesetInput)
   const qualityReportInput: QualityReportInput = {
     versionId: version,
+    ...(input.template === undefined
+      ? {}
+      : {
+          templateId: input.template.id,
+          templateVersion: input.template.version,
+        }),
+    buildTaskId: version,
     totalLines,
     totalPoints,
     generatedLineFeatures: features.filter(({ kind }) => kind === 'line').length,
@@ -369,7 +381,14 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
     groupCounts: {
       gwlx: countBy(metadata.map(({ properties }) => properties), 'pipeType'),
       gs: countBy(metadata.map(({ properties }) => properties), 'owner'),
+      elevationSource: adaptation.report.sourceCounts.elevation,
+      pointSizeSource: adaptation.report.sourceCounts.pointSize,
+      pointLineMatch: {
+        matched: adaptation.report.matchedPoints,
+        unmatched: Math.max(0, adaptation.report.totalPoints - adaptation.report.matchedPoints),
+      },
     },
+    tileStats: tiledFeatures.tileStats,
   }
   if (input.limit !== undefined)
     qualityReportInput.rowLimit = input.limit
@@ -1026,15 +1045,18 @@ function createTiledFeatureFiles(features: BuildFeature[], options: TileBuildOpt
   }, options)
   const files: Record<string, string | Uint8Array> = {}
   const children: TilesetChildInput[] = []
+  const tileByteSizes: number[] = []
 
   for (const leaf of leaves) {
     const mesh = combineMeshes(leaf.features.map(({ mesh }) => mesh))
     const metadata = leaf.features.map(({ metadata }) => metadata)
     const glbPath = `tiles/${leaf.id}.glb`
     const metadataPath = `tiles/${leaf.id}.metadata.json`
+    const glb = writeGlb(mesh, metadata)
 
-    files[glbPath] = writeGlb(mesh, metadata)
+    files[glbPath] = glb
     files[metadataPath] = `${JSON.stringify(writeFeatureMetadataSidecar(metadata), null, 2)}\n`
+    tileByteSizes.push(glb.byteLength)
     children.push({
       boundingVolume: createBoundingVolume(mesh),
       geometricError: 0,
@@ -1047,6 +1069,13 @@ function createTiledFeatureFiles(features: BuildFeature[], options: TileBuildOpt
     files,
     children,
     boundingVolume: boundsToBoundingVolume(rootBounds),
+    tileStats: {
+      count: tileByteSizes.length,
+      maxBytes: tileByteSizes.length === 0 ? 0 : Math.max(...tileByteSizes),
+      averageBytes: tileByteSizes.length === 0
+        ? 0
+        : tileByteSizes.reduce((sum, bytes) => sum + bytes, 0) / tileByteSizes.length,
+    },
   }
 }
 

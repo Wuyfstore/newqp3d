@@ -11,6 +11,8 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
     getPoint: async () => ({}),
     getLatestVersion: async () => ({ version: 'v1', tilesetUrl: '/tiles/v1/tileset.json' }),
     getLatestQuality: async () => ({}),
+    getQualityReport: async () => ({}),
+    getAdaptationReport: async () => ({}),
     listSchemas: async () => [{ name: 'public' }],
     listTables: async () => [
       { schema: 'public', name: 'sys_016_tancexbtjinfo_sde', type: 'table', estimatedRows: 10 },

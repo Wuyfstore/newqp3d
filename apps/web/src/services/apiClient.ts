@@ -27,11 +27,48 @@ export type PipePointDetail = Record<string, unknown> & {
 export interface QualityReport {
   versionId?: string
   version?: string
+  templateId?: string
+  templateVersion?: string
+  buildTaskId?: string
+  recordCount?: number
+  successCount?: number
+  failureCount?: number
   totalLines?: number
   totalPoints?: number
+  generatedLineFeatures?: number
+  generatedPointFeatures?: number
   flags?: unknown[]
   flagCounts?: Record<string, number>
+  groupCounts?: Record<string, Record<string, number>>
+  specParsingStats?: Record<string, number>
+  elevationSourceStats?: Record<string, number>
+  pointSizeSourceStats?: Record<string, number>
+  pointLineMatchStats?: Record<string, number>
+  tileStats?: {
+    count: number
+    maxBytes: number
+    averageBytes: number
+  }
   summary?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface AdaptationReport {
+  versionId?: string
+  totalPoints?: number
+  matchedPoints?: number
+  sourceCounts?: {
+    pointType?: Record<string, number>
+    pointSize?: Record<string, number>
+    elevation?: Record<string, number>
+  }
+  connectionDegreeCounts?: Record<string, number>
+  inferredTypeCounts?: Record<string, number>
+  examples?: Array<{
+    pointId?: string
+    connectedLineIds?: string[]
+    sources?: Record<string, unknown>
+  }>
   [key: string]: unknown
 }
 
@@ -113,6 +150,8 @@ export interface ApiClient {
   getPoint(gdbm: string): Promise<PipePointDetail>
   getLatestVersion(): Promise<VersionManifest>
   getLatestQuality(): Promise<QualityReport>
+  getQualityReport(version: string): Promise<QualityReport>
+  getAdaptationReport(version: string): Promise<AdaptationReport>
   listSchemas(): Promise<DataSourceSchema[]>
   listTables(schema: string): Promise<DataSourceTable[]>
   getTableProfile(schema: string, table: string): Promise<DataSourceTableProfile>
@@ -147,6 +186,12 @@ export function createApiClient(baseUrl: string, fetcher: ApiFetcher = input => 
     },
     getLatestQuality() {
       return getJson<QualityReport>(fetcher, `${normalizedBaseUrl}/quality/latest`)
+    },
+    getQualityReport(version) {
+      return getJson<QualityReport>(fetcher, `${normalizedBaseUrl}/versions/${encodeURIComponent(version)}/quality-report`)
+    },
+    getAdaptationReport(version) {
+      return getJson<AdaptationReport>(fetcher, `${normalizedBaseUrl}/versions/${encodeURIComponent(version)}/adaptation-report`)
     },
     async listSchemas() {
       const response = await getJson<{ schemas: DataSourceSchema[] }>(fetcher, `${normalizedBaseUrl}/datasource/schemas`)

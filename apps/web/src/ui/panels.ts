@@ -1,5 +1,5 @@
 import type { PickTarget } from '../cesium/picking'
-import type { PipeLineDetail, PipePointDetail, QualityReport } from '../services/apiClient'
+import type { AdaptationReport, PipeLineDetail, PipePointDetail, QualityReport } from '../services/apiClient'
 
 const STYLE_ID = 'qp3d-interaction-panel-styles'
 const LINE_FIELDS = [
@@ -212,6 +212,52 @@ export function renderQualitySummary(report: QualityReport): HTMLElement {
   return panel
 }
 
+export function renderBuildReportsPanel(input: {
+  quality: QualityReport
+  adaptation?: AdaptationReport | null
+}): HTMLElement {
+  const panel = document.createElement('section')
+  panel.className = 'qp3d-panel qp3d-panel--reports'
+
+  const title = document.createElement('h2')
+  title.className = 'qp3d-panel__title'
+  title.textContent = '构建报告'
+
+  const subtitle = document.createElement('div')
+  subtitle.className = 'qp3d-panel__subtitle'
+  subtitle.textContent = formatValue(input.quality.versionId ?? input.quality.version)
+
+  const rows: Array<[string, unknown]> = [
+    ['模板', input.quality.templateId],
+    ['模板版本', input.quality.templateVersion],
+    ['构建任务', input.quality.buildTaskId],
+    ['记录数', input.quality.recordCount],
+    ['成功数', input.quality.successCount],
+    ['失败数', input.quality.failureCount],
+    ['管线数', input.quality.totalLines],
+    ['管点数', input.quality.totalPoints],
+    ['Tile 数', input.quality.tileStats?.count],
+    ['最大 Tile', input.quality.tileStats?.maxBytes],
+    ['平均 Tile', input.quality.tileStats?.averageBytes],
+  ]
+
+  panel.append(title, subtitle, renderRows(rows))
+  appendStats(panel, '规格解析', input.quality.specParsingStats)
+  appendStats(panel, '高程来源', input.quality.elevationSourceStats)
+  appendStats(panel, 'pointSize 来源', input.quality.pointSizeSourceStats)
+  appendStats(panel, '点线匹配', input.quality.pointLineMatchStats)
+  appendStats(panel, '质量标记', input.quality.flagCounts)
+
+  if (input.adaptation) {
+    appendStats(panel, '管点类型来源', input.adaptation.sourceCounts?.pointType)
+    appendStats(panel, '管点尺寸来源', input.adaptation.sourceCounts?.pointSize)
+    appendStats(panel, '管点高程来源', input.adaptation.sourceCounts?.elevation)
+    appendExamples(panel, input.adaptation.examples ?? [])
+  }
+
+  return panel
+}
+
 export function renderEmptyPanel(message: string): HTMLElement {
   const panel = document.createElement('section')
   panel.className = 'qp3d-panel qp3d-panel--empty'
@@ -251,6 +297,50 @@ function renderRows(rows: Array<[string, unknown]>): HTMLElement {
   }
 
   return list
+}
+
+function appendStats(panel: HTMLElement, label: string, stats: Record<string, unknown> | undefined): void {
+  if (stats == null || Object.keys(stats).length === 0) {
+    return
+  }
+
+  const section = document.createElement('div')
+  section.className = 'qp3d-flags'
+  const title = document.createElement('div')
+  title.className = 'qp3d-flags__label'
+  title.textContent = label
+  const list = document.createElement('ul')
+  for (const [key, value] of Object.entries(stats)) {
+    const item = document.createElement('li')
+    item.textContent = `${key}: ${formatValue(value)}`
+    list.append(item)
+  }
+
+  section.append(title, list)
+  panel.append(section)
+}
+
+function appendExamples(panel: HTMLElement, examples: NonNullable<AdaptationReport['examples']>): void {
+  if (examples.length === 0) {
+    return
+  }
+
+  const section = document.createElement('div')
+  section.className = 'qp3d-flags'
+  const title = document.createElement('div')
+  title.className = 'qp3d-flags__label'
+  title.textContent = '异常样例'
+  const list = document.createElement('ul')
+  for (const example of examples.slice(0, 10)) {
+    const item = document.createElement('li')
+    const connected = example.connectedLineIds?.join(', ') ?? ''
+    const sources = example.sources ? ` ${JSON.stringify(example.sources)}` : ''
+    item.textContent = `${example.pointId ?? '未知管点'} ${connected}${sources}`.trim()
+    list.append(item)
+  }
+
+  section.append(title, list)
+  panel.append(section)
 }
 
 function renderQualityFlags(detail: PipeLineDetail | PipePointDetail): HTMLElement | undefined {
