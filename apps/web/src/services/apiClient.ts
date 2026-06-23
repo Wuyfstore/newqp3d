@@ -162,6 +162,7 @@ export interface ApiClient {
   getLine(guid: string): Promise<PipeLineDetail>
   getPoint(gdbm: string): Promise<PipePointDetail>
   getLatestVersion(): Promise<VersionManifest>
+  getVersion(version: string): Promise<VersionManifest>
   getLatestQuality(): Promise<QualityReport>
   getQualityReport(version: string): Promise<QualityReport>
   getAdaptationReport(version: string): Promise<AdaptationReport>
@@ -201,6 +202,9 @@ export function createApiClient(baseUrl: string, fetcher: ApiFetcher = input => 
     },
     getLatestVersion() {
       return getJson<VersionManifest>(fetcher, `${normalizedBaseUrl}/versions/latest`)
+    },
+    getVersion(version) {
+      return getJson<VersionManifest>(fetcher, `${normalizedBaseUrl}/versions/${encodeURIComponent(version)}`)
     },
     getLatestQuality() {
       return getJson<QualityReport>(fetcher, `${normalizedBaseUrl}/quality/latest`)

@@ -7,6 +7,7 @@ export interface BuildTaskCenterOptions {
   templateId?: string
   getTemplateId?: () => string
   onVersionActivated?: () => void
+  onVersionPreview?: (version: string) => void | Promise<void>
   pollIntervalMs?: number
 }
 
@@ -116,6 +117,12 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     options.onVersionActivated?.()
   }
 
+  async function previewTaskVersion(version: string): Promise<void> {
+    setStatus(element, '版本预览加载中')
+    await options.onVersionPreview?.(version)
+    setStatus(element, `版本预览中: ${version}`)
+  }
+
   element.addEventListener('click', event => {
     const target = event.target
     if (!(target instanceof HTMLElement)) {
@@ -149,6 +156,13 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     if (publishButton) {
       void publishTaskVersion(publishButton.dataset.buildTaskPublishId ?? '')
         .catch(error => setStatus(element, `版本发布失败: ${formatError(error)}`))
+      return
+    }
+
+    const previewButton = target.closest<HTMLElement>('[data-build-task-preview]')
+    if (previewButton) {
+      void previewTaskVersion(previewButton.dataset.buildTaskPreviewId ?? '')
+        .catch(error => setStatus(element, `版本预览失败: ${formatError(error)}`))
       return
     }
 
@@ -304,6 +318,13 @@ function renderTaskDetail(element: HTMLElement, task: BuildTask | undefined, ver
 
   detail.append(title, rowList)
   if (task.status === 'completed' && task.outputVersion) {
+    const preview = document.createElement('button')
+    preview.type = 'button'
+    preview.setAttribute('data-build-task-preview', '')
+    preview.dataset.buildTaskPreviewId = task.outputVersion
+    preview.textContent = '预览'
+    detail.append(preview)
+
     const publish = document.createElement('button')
     publish.type = 'button'
     publish.setAttribute('data-build-task-publish', '')

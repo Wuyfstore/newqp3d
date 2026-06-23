@@ -27,6 +27,7 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
     getLine: async () => ({}),
     getPoint: async () => ({}),
     getLatestVersion: async () => ({ version: 'v1', tilesetUrl: '/tiles/v1/tileset.json' }),
+    getVersion: async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }),
     getLatestQuality: async () => ({}),
     getQualityReport: async () => ({}),
     getAdaptationReport: async () => ({}),
@@ -141,6 +142,69 @@ describe('build task center', () => {
     center.element.querySelector<HTMLButtonElement>('[data-version-rollback-id="network-old"]')!.click()
     await vi.waitFor(() => expect(rollbackVersion).toHaveBeenCalledWith('network-old'))
     await vi.waitFor(() => expect(center.element.textContent).toContain('已回滚到: network-old'))
+  })
+
+  it('previews completed task output without publishing or activating latest', async () => {
+    const publishVersion = vi.fn(async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }))
+    const onVersionActivated = vi.fn()
+    const onVersionPreview = vi.fn(async () => undefined)
+    const api = createApi({
+      listBuildTasks: vi.fn(async () => [
+        createTask({ status: 'completed', progress: 100, outputVersion: 'network-preview' }),
+      ]),
+      getBuildTask: vi.fn(async id => createTask({
+        id,
+        status: 'completed',
+        progress: 100,
+        outputVersion: 'network-preview',
+      })),
+      publishVersion,
+    })
+    const center = createBuildTaskCenter({
+      apiClient: api,
+      templateId: 'template-1',
+      onVersionActivated,
+      onVersionPreview,
+    })
+    document.body.replaceChildren(center.element)
+
+    await center.load()
+    center.element.querySelector<HTMLButtonElement>('[data-build-task-preview]')!.click()
+    await vi.waitFor(() => expect(onVersionPreview).toHaveBeenCalledWith('network-preview'))
+
+    expect(publishVersion).not.toHaveBeenCalled()
+    expect(onVersionActivated).not.toHaveBeenCalled()
+    expect(center.element.textContent).toContain('版本预览中: network-preview')
+    expect(center.element.querySelector('[data-build-task-publish]')).not.toBeNull()
+  })
+
+  it('keeps publish actions available when task preview fails', async () => {
+    const onVersionPreview = vi.fn(async () => {
+      throw new Error('tileset missing')
+    })
+    const api = createApi({
+      listBuildTasks: vi.fn(async () => [
+        createTask({ status: 'completed', progress: 100, outputVersion: 'network-preview' }),
+      ]),
+      getBuildTask: vi.fn(async id => createTask({
+        id,
+        status: 'completed',
+        progress: 100,
+        outputVersion: 'network-preview',
+      })),
+    })
+    const center = createBuildTaskCenter({
+      apiClient: api,
+      templateId: 'template-1',
+      onVersionPreview,
+    })
+    document.body.replaceChildren(center.element)
+
+    await center.load()
+    center.element.querySelector<HTMLButtonElement>('[data-build-task-preview]')!.click()
+    await vi.waitFor(() => expect(center.element.textContent).toContain('版本预览失败: tileset missing'))
+
+    expect(center.element.querySelector('[data-build-task-publish]')).not.toBeNull()
   })
 
   it('uses the current template id when starting a build task', async () => {

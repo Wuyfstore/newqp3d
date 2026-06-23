@@ -1,7 +1,7 @@
 import type { Viewer } from 'cesium'
 
 import { createPipeNetworkViewer } from './cesium/createViewer'
-import { loadPipeNetworkLayers, type LayerHandles } from './cesium/layers'
+import { loadPipeNetworkLayers, type LayerHandles, type VersionManifest } from './cesium/layers'
 import { flyToSearchResult, installPicking, type PickTarget } from './cesium/picking'
 import { installPipeNetworkStyles } from './cesium/styles'
 import { createApiClient, type ApiClient, type SearchResult } from './services/apiClient'
@@ -69,10 +69,10 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
   let buildTaskCenter: BuildTaskCenter | undefined
   let currentBuildTemplateId = 'reference-liyang-drainage-network'
   let disposed = false
-  const reloadLatestVersion = async () => {
-    status.textContent = 'tileset: reloading'
-    const nextHandles = await loadLatestVersion(viewer, apiClient, state, status, propertyPanel)
-    if (disposed) {
+  let activationRequestId = 0
+  const activateVersion = async (manifest: VersionManifest, requestId: number) => {
+    const nextHandles = await loadVersionManifest(viewer, apiClient, state, status, propertyPanel, manifest)
+    if (disposed || requestId !== activationRequestId) {
       nextHandles.destroy()
       return
     }
@@ -80,6 +80,18 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
     handles?.destroy()
     handles = nextHandles
     handles.applyState(state.snapshot())
+  }
+  const reloadLatestVersion = async () => {
+    const requestId = ++activationRequestId
+    status.textContent = 'tileset: reloading'
+    const manifest = await apiClient.getLatestVersion()
+    await activateVersion(manifest, requestId)
+  }
+  const previewVersion = async (version: string) => {
+    const requestId = ++activationRequestId
+    status.textContent = `tileset: preview loading ${version}`
+    const manifest = await apiClient.getVersion(version)
+    await activateVersion(manifest, requestId)
   }
 
   renderToolbar(shell, state, () => {
@@ -110,6 +122,7 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
     },
     () => currentBuildTemplateId,
     reloadLatestVersion,
+    previewVersion,
   )
 
   const disposePicking = installPicking(viewer, apiClient, {
@@ -157,6 +170,7 @@ function installBuildTaskCenter(
   setCenter: (center: BuildTaskCenter | undefined) => void,
   getTemplateId: () => string,
   reloadLatestVersion: () => Promise<void>,
+  previewVersion: (version: string) => Promise<void>,
 ): void {
   const button = requireElement<HTMLButtonElement>(shell, '[data-open-build-task-center]')
   button.addEventListener('click', () => {
@@ -175,6 +189,7 @@ function installBuildTaskCenter(
           status.textContent = `tileset: unavailable (${formatError(error)})`
         })
       },
+      onVersionPreview: previewVersion,
     })
     setCenter(center)
     showPanel(propertyPanel, center.element)
@@ -229,14 +244,15 @@ function installTemplateWorkbench(
   })
 }
 
-async function loadLatestVersion(
+async function loadVersionManifest(
   viewer: Viewer,
   apiClient: ApiClient,
   state: LayerState,
   status: HTMLElement,
   propertyPanel: HTMLElement,
+  manifest: VersionManifest,
 ): Promise<LayerHandles> {
-  const manifest = await apiClient.getLatestVersion()
+  const handles = await loadPipeNetworkLayers(viewer, manifest)
   status.textContent = `tileset: ${manifest.version}`
   void loadBuildReports(apiClient, manifest.version)
     .then(reports => showPanel(propertyPanel, renderBuildReportsPanel(reports)))
@@ -244,8 +260,6 @@ async function loadLatestVersion(
       // The tileset is still usable when the optional summary is unavailable.
     })
 
-  const handles = await loadPipeNetworkLayers(viewer, manifest)
-  handles.applyState(state.snapshot())
   return handles
 }
 

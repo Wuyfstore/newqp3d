@@ -61,11 +61,13 @@ describe('api client', () => {
       tilesetUrl: '/tiles/v1/tileset.json',
       metadataUrl: '/tiles/v1/metadata.json',
     })
+    await expect(api.getVersion('network/preview')).resolves.toEqual({ version: 'v1', summary: { lineCount: 2 } })
     await expect(api.getLatestQuality()).resolves.toEqual({ version: 'v1', summary: { lineCount: 2 } })
     await expect(api.getQualityReport('v1')).resolves.toEqual({ version: 'v1', summary: { lineCount: 2 } })
     expect(fetcher).toHaveBeenNthCalledWith(1, '/api/versions/latest')
-    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/quality/latest')
-    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/versions/v1/quality-report')
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/versions/network%2Fpreview')
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/quality/latest')
+    expect(fetcher).toHaveBeenNthCalledWith(4, '/api/versions/v1/quality-report')
   })
 
   it('loads version-specific adaptation reports', async () => {

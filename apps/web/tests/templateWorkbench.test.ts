@@ -10,6 +10,7 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
     getLine: async () => ({}),
     getPoint: async () => ({}),
     getLatestVersion: async () => ({ version: 'v1', tilesetUrl: '/tiles/v1/tileset.json' }),
+    getVersion: async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }),
     getLatestQuality: async () => ({}),
     getQualityReport: async () => ({}),
     getAdaptationReport: async () => ({}),

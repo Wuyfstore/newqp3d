@@ -54,6 +54,7 @@ describe('installPicking', () => {
       getLine: vi.fn((guid: string) => guid === 'slow' ? deferredSlow.promise : Promise.resolve({ guid })),
       getPoint: vi.fn(),
       getLatestVersion: vi.fn(),
+      getVersion: vi.fn(),
       getLatestQuality: vi.fn(),
       getQualityReport: vi.fn(),
       getAdaptationReport: vi.fn(),

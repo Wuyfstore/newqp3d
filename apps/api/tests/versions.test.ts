@@ -125,18 +125,30 @@ describe('version and quality routes', () => {
       { version: 'network-ready', status: 'ready', tilesetUrl: '/tiles/network-ready/tileset.json' },
       { version: 'network-old', status: 'published', tilesetUrl: '/tiles/network-old/tileset.json' },
     ]
+    let publishCallCount = 0
     const app = await createServer(createRepository({
       listVersions: async () => versions,
-      publishVersion: async version => ({
+      getVersion: async version => ({
         version,
         tilesetUrl: `/tiles/${version}/tileset.json`,
         metadataUrl: `/tiles/${version}/metadata.json`,
         qualityReportUrl: `/tiles/${version}/quality-report.json`,
       }),
+      publishVersion: async version => {
+        publishCallCount += 1
+        return {
+          version,
+          tilesetUrl: `/tiles/${version}/tileset.json`,
+          metadataUrl: `/tiles/${version}/metadata.json`,
+          qualityReportUrl: `/tiles/${version}/quality-report.json`,
+        }
+      },
     }))
 
     try {
       const listResponse = await app.inject({ method: 'GET', url: '/api/versions' })
+      const previewResponse = await app.inject({ method: 'GET', url: '/api/versions/network-ready' })
+      expect(publishCallCount).toBe(0)
       const publishResponse = await app.inject({
         method: 'POST',
         url: '/api/versions/network-ready/publish',
@@ -144,11 +156,17 @@ describe('version and quality routes', () => {
 
       expect(listResponse.statusCode).toBe(200)
       expect(listResponse.json()).toEqual({ versions })
+      expect(previewResponse.statusCode).toBe(200)
+      expect(previewResponse.json()).toMatchObject({
+        version: 'network-ready',
+        tilesetUrl: '/tiles/network-ready/tileset.json',
+      })
       expect(publishResponse.statusCode).toBe(200)
       expect(publishResponse.json()).toMatchObject({
         version: 'network-ready',
         tilesetUrl: '/tiles/network-ready/tileset.json',
       })
+      expect(publishCallCount).toBe(1)
     } finally {
       await app.close()
     }
@@ -269,6 +287,11 @@ describe('version and quality routes', () => {
       expect.objectContaining({ version: 'network-new', status: 'ready' }),
       expect.objectContaining({ version: 'network-old', status: 'ready' }),
     ])
+    await expect(repository.getVersion('network-new')).resolves.toEqual(expect.objectContaining({
+      version: 'network-new',
+      tilesetUrl: '/tiles/network-new/tileset.json',
+    }))
+    await expect(repository.getLatestVersion()).resolves.toBeNull()
 
     await expect(repository.publishVersion('network-old')).resolves.toEqual(expect.objectContaining({
       version: 'network-old',
