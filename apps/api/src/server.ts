@@ -4,6 +4,7 @@ import Fastify from 'fastify'
 import { createFileTemplateStore } from './templates/fileTemplateStore.js'
 import { registerDatasourceRoutes } from './routes/datasource.js'
 import { registerDetailsRoutes } from './routes/details.js'
+import { registerPreflightRoutes } from './routes/preflight.js'
 import { registerQualityRoutes } from './routes/quality.js'
 import { registerSearchRoutes } from './routes/search.js'
 import { registerTemplateRoutes } from './routes/templates.js'
@@ -95,6 +96,7 @@ export async function createServer(repository: ApiRepository, options: CreateSer
 
   await app.register(cors, { origin: true })
   await registerDatasourceRoutes(app, repository)
+  await registerPreflightRoutes(app, repository, templateStore)
   await registerTemplateRoutes(app, templateStore)
   await registerSearchRoutes(app, repository)
   await registerDetailsRoutes(app, repository)
