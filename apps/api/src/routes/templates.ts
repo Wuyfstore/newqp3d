@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { BuildTemplate } from '@new-qp3d/shared'
-
 import type { BuildTemplateStore } from '../server.js'
 import {
   TemplateConflictError,
@@ -62,18 +61,22 @@ export async function registerTemplateRoutes(app: FastifyInstance, store: BuildT
 
   app.get('/api/build-templates/:id/export', async (request, reply) => {
     const { id } = request.params as { id: string }
-    const template = await store.get(id)
-
-    if (template == null) {
-      return reply.code(404).send({ error: 'Build template not found' })
+    try {
+      return await store.export(id)
+    } catch (error) {
+      return sendTemplateError(reply, error)
     }
-
-    return template
   })
 
   app.post('/api/build-templates/import', async (request, reply) => {
+    const body = (request.body ?? {}) as { dataSourceId?: unknown }
     try {
-      const template = await store.import(request.body as BuildTemplate)
+      const template = await store.import(
+        request.body,
+        typeof body.dataSourceId === 'string' && body.dataSourceId.trim()
+          ? { dataSourceId: body.dataSourceId.trim() }
+          : undefined,
+      )
       return reply.code(201).send(template)
     } catch (error) {
       return sendTemplateError(reply, error)

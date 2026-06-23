@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { createReferenceBuildTemplate } from '@new-qp3d/shared'
 import { createApiClient } from '../src/services/apiClient'
 
 describe('api client', () => {
@@ -185,6 +186,67 @@ describe('api client', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id: 'template-1', name: '模板' }),
+    })
+  })
+
+  it('exports and imports build template migration packages', async () => {
+    const template = {
+      ...createReferenceBuildTemplate(),
+      id: 'template-1-imported',
+      dataSourceId: 'source-env',
+    }
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/build-templates/template%2F1/export')) {
+        return new Response(JSON.stringify({
+          schemaVersion: 'build-template.v1',
+          template: {
+            ...template,
+            id: 'template/1',
+          },
+        }))
+      }
+
+      return new Response(JSON.stringify({
+        id: 'template-1-imported',
+        dataSourceId: 'target-env',
+      }), { status: 201 })
+    })
+    const api = createApiClient('/api', fetcher)
+
+    await expect(api.exportBuildTemplate('template/1')).resolves.toEqual({
+      schemaVersion: 'build-template.v1',
+      template: {
+        ...template,
+        id: 'template/1',
+      },
+    })
+    await expect(api.importBuildTemplate({
+      schemaVersion: 'build-template.v1',
+      template,
+      dataSourceId: 'target-env',
+    })).resolves.toEqual({
+      id: 'template-1-imported',
+      dataSourceId: 'target-env',
+    })
+    await expect(api.importBuildTemplate(template)).resolves.toEqual({
+      id: 'template-1-imported',
+      dataSourceId: 'target-env',
+    })
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/build-templates/template%2F1/export')
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/build-templates/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        schemaVersion: 'build-template.v1',
+        template,
+        dataSourceId: 'target-env',
+      }),
+    })
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/build-templates/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(template),
     })
   })
 

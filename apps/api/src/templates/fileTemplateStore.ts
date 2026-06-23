@@ -2,7 +2,9 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import {
+  BUILD_TEMPLATE_SCHEMA_VERSION,
   type BuildTemplate,
+  type BuildTemplateMigrationPackage,
   assertValidBuildTemplate,
   validateBuildTemplate,
 } from '@new-qp3d/shared'
@@ -91,8 +93,21 @@ export function createFileTemplateStore(options: FileTemplateStoreOptions = {}):
       return duplicated
     },
 
-    async import(template) {
-      const normalized = validateForWrite(template)
+    async export(id) {
+      const template = await this.get(id)
+      if (template == null) {
+        throw new TemplateNotFoundError(id)
+      }
+
+      return createMigrationPackage(template)
+    },
+
+    async import(input, options = {}) {
+      const template = unpackTemplateImport(input)
+      const normalized = validateForWrite({
+        ...template,
+        ...(options.dataSourceId === undefined ? {} : { dataSourceId: options.dataSourceId }),
+      })
       await assertTemplateDoesNotExist(root, normalized.id)
       await writeStoredTemplate(root, normalized)
       return normalized
@@ -119,6 +134,32 @@ export class TemplateConflictError extends Error {
     super(`Build template already exists: ${id}`)
     this.name = 'TemplateConflictError'
   }
+}
+
+export function createMigrationPackage(template: BuildTemplate): BuildTemplateMigrationPackage {
+  return {
+    schemaVersion: BUILD_TEMPLATE_SCHEMA_VERSION,
+    template: sanitizeBuildTemplate(template),
+  }
+}
+
+function unpackTemplateImport(input: unknown): BuildTemplate {
+  if (isTemplateMigrationPackage(input)) {
+    if (input.schemaVersion !== BUILD_TEMPLATE_SCHEMA_VERSION) {
+      throw new TemplateValidationError([{ path: 'schemaVersion', reason: 'unsupported schema version' }])
+    }
+
+    return input.template
+  }
+
+  return input as BuildTemplate
+}
+
+function isTemplateMigrationPackage(input: unknown): input is {
+  schemaVersion: unknown
+  template: BuildTemplate
+} {
+  return typeof input === 'object' && input !== null && !Array.isArray(input) && 'schemaVersion' in input && 'template' in input
 }
 
 function validateForWrite(template: BuildTemplate): BuildTemplate {

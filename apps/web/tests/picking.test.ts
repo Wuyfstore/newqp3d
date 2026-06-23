@@ -64,6 +64,8 @@ describe('installPicking', () => {
       listTables: vi.fn(),
       getTableProfile: vi.fn(),
       createBuildTemplate: vi.fn(),
+      exportBuildTemplate: vi.fn(),
+      importBuildTemplate: vi.fn(),
       createBuildTask: vi.fn(),
       listBuildTasks: vi.fn(),
       getBuildTask: vi.fn(),

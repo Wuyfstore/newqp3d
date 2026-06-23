@@ -2,7 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { createReferenceBuildTemplate } from '@new-qp3d/shared'
+import {
+  BUILD_TEMPLATE_SCHEMA_VERSION,
+  createReferenceBuildTemplate,
+} from '@new-qp3d/shared'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createFileTemplateStore } from '../src/templates/fileTemplateStore.js'
@@ -117,9 +120,12 @@ describe('template management routes', () => {
       const exportResponse = await app.inject({ method: 'GET', url: '/api/build-templates/reference-template/export' })
       expect(exportResponse.statusCode).toBe(200)
       expect(exportResponse.json()).toMatchObject({
-        id: 'reference-template',
-        name: '更新后的模板',
-        status: 'validated',
+        schemaVersion: BUILD_TEMPLATE_SCHEMA_VERSION,
+        template: {
+          id: 'reference-template',
+          name: '更新后的模板',
+          status: 'validated',
+        },
       })
       expect(exportResponse.body).not.toContain('postgres://')
       expect(exportResponse.body).not.toContain('password')
@@ -137,6 +143,61 @@ describe('template management routes', () => {
       expect(importResponse.json()).toMatchObject({
         id: 'imported-template',
         name: '导入模板',
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('imports migration packages only when the schema version is supported and can rebind the datasource', async () => {
+    const store = createFileTemplateStore({ root: tempRoot })
+    const app = await createServer(createRepository(), { templateStore: store })
+    const template = {
+      ...createReferenceBuildTemplate(),
+      id: 'migration-source-template',
+      dataSourceId: 'source-environment',
+    }
+
+    try {
+      const unsupportedResponse = await app.inject({
+        method: 'POST',
+        url: '/api/build-templates/import',
+        payload: {
+          schemaVersion: 'build-template.v999',
+          template,
+        },
+      })
+      expect(unsupportedResponse.statusCode).toBe(400)
+      expect(unsupportedResponse.json()).toEqual({
+        error: 'Invalid build template',
+        validationErrors: [{ path: 'schemaVersion', reason: 'unsupported schema version' }],
+      })
+
+      const importResponse = await app.inject({
+        method: 'POST',
+        url: '/api/build-templates/import',
+        payload: {
+          schemaVersion: BUILD_TEMPLATE_SCHEMA_VERSION,
+          template: {
+            ...template,
+            id: 'migration-imported-template',
+          },
+          dataSourceId: 'target-environment',
+        },
+      })
+      expect(importResponse.statusCode).toBe(201)
+      expect(importResponse.json()).toMatchObject({
+        id: 'migration-imported-template',
+        dataSourceId: 'target-environment',
+      })
+
+      const detailResponse = await app.inject({
+        method: 'GET',
+        url: '/api/build-templates/migration-imported-template',
+      })
+      expect(detailResponse.json()).toMatchObject({
+        id: 'migration-imported-template',
+        dataSourceId: 'target-environment',
       })
     } finally {
       await app.close()
@@ -216,8 +277,8 @@ describe('template management routes', () => {
       expect(exportResponse.statusCode).toBe(200)
       expect(exportResponse.body).not.toContain('postgres://')
       expect(exportResponse.body).not.toContain('password')
-      expect(exportResponse.json()).not.toHaveProperty('databaseUrl')
-      expect(exportResponse.json().lineTable).not.toHaveProperty('password')
+      expect(exportResponse.json().template).not.toHaveProperty('databaseUrl')
+      expect(exportResponse.json().template.lineTable).not.toHaveProperty('password')
     } finally {
       await app.close()
     }

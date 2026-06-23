@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  BUILD_TEMPLATE_SCHEMA_VERSION,
   createReferenceBuildTemplate,
   validateBuildTemplate,
 } from '../src/buildTemplate.js'
@@ -25,6 +26,10 @@ describe('build template schema', () => {
     const result = validateBuildTemplate(parsed)
 
     expect(result.valid).toBe(true)
+  })
+
+  it('exposes the supported migration schema version for template import and export', () => {
+    expect(BUILD_TEMPLATE_SCHEMA_VERSION).toBe('build-template.v1')
   })
 
   it('reports missing required fields with a concrete path and reason', () => {

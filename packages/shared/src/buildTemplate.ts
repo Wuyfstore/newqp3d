@@ -6,6 +6,8 @@ export type LengthUnit = 'auto' | 'm' | 'km'
 export type FlowUnknownStrategy = 'forward' | 'reverse' | 'unknown'
 export type VersionNameStrategy = 'timestamp' | 'template-version' | 'manual'
 
+export const BUILD_TEMPLATE_SCHEMA_VERSION = 'build-template.v1'
+
 export interface BuildTemplateTableConfig {
   schema: string
   table: string
@@ -62,6 +64,11 @@ export interface BuildTemplate {
   flowRule: BuildTemplateFlowRule
   lod: BuildTemplateLodConfig
   output: BuildTemplateOutputConfig
+}
+
+export interface BuildTemplateMigrationPackage {
+  schemaVersion: typeof BUILD_TEMPLATE_SCHEMA_VERSION
+  template: BuildTemplate
 }
 
 export interface BuildTemplateValidationError {

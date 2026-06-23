@@ -45,6 +45,11 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
       recommendedFieldMapping: {},
     }),
     createBuildTemplate: async template => template as never,
+    exportBuildTemplate: async () => ({
+      schemaVersion: 'build-template.v1',
+      template: {} as never,
+    }),
+    importBuildTemplate: async input => 'template' in input ? input.template : input,
     createBuildTask: async () => createTask({ status: 'queued', progress: 0 }),
     listBuildTasks: async () => [],
     getBuildTask: async id => createTask({ id }),

@@ -12,7 +12,11 @@ import { registerTemplateRoutes } from './routes/templates.js'
 import { registerVersionRoutes } from './routes/versions.js'
 import { createCliBuildTaskRunner } from './tasks/buildTaskRunner.js'
 import { createMemoryBuildTaskStore } from './tasks/buildTaskStore.js'
-import type { BuildTemplate, BuildTemplateStatus } from '@new-qp3d/shared'
+import type {
+  BuildTemplate,
+  BuildTemplateMigrationPackage,
+  BuildTemplateStatus,
+} from '@new-qp3d/shared'
 import type { BuildTaskRunner, BuildTaskStore } from './tasks/buildTaskTypes.js'
 
 export type {
@@ -104,7 +108,8 @@ export interface BuildTemplateStore {
   create(template: BuildTemplate): Promise<BuildTemplate>
   update(id: string, template: BuildTemplate): Promise<BuildTemplate>
   duplicate(id: string, options: { id: string; name?: string }): Promise<BuildTemplate>
-  import(template: BuildTemplate): Promise<BuildTemplate>
+  export(id: string): Promise<BuildTemplateMigrationPackage>
+  import(input: unknown, options?: { dataSourceId?: string }): Promise<BuildTemplate>
 }
 
 export interface CreateServerOptions {

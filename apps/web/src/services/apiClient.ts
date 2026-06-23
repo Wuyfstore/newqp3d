@@ -1,5 +1,7 @@
 import type { VersionManifest } from '../cesium/layers'
-import type { BuildTemplate } from '@new-qp3d/shared'
+import type { BuildTemplate, BuildTemplateMigrationPackage } from '@new-qp3d/shared'
+
+export type BuildTemplateImportPayload = BuildTemplate | (BuildTemplateMigrationPackage & { dataSourceId?: string })
 
 export interface SearchResult {
   type: 'line' | 'point'
@@ -170,6 +172,8 @@ export interface ApiClient {
   listTables(schema: string): Promise<DataSourceTable[]>
   getTableProfile(schema: string, table: string): Promise<DataSourceTableProfile>
   createBuildTemplate(template: unknown): Promise<BuildTemplate>
+  exportBuildTemplate(id: string): Promise<BuildTemplateMigrationPackage>
+  importBuildTemplate(input: BuildTemplateImportPayload): Promise<BuildTemplate>
   createBuildTask(templateId: string): Promise<BuildTask>
   listBuildTasks(): Promise<BuildTask[]>
   getBuildTask(id: string): Promise<BuildTask>
@@ -236,6 +240,12 @@ export function createApiClient(baseUrl: string, fetcher: ApiFetcher = input => 
     },
     createBuildTemplate(template) {
       return postJson<BuildTemplate>(fetcher, `${normalizedBaseUrl}/build-templates`, template)
+    },
+    exportBuildTemplate(id) {
+      return getJson<BuildTemplateMigrationPackage>(fetcher, `${normalizedBaseUrl}/build-templates/${encodeURIComponent(id)}/export`)
+    },
+    importBuildTemplate(input) {
+      return postJson<BuildTemplate>(fetcher, `${normalizedBaseUrl}/build-templates/import`, input)
     },
     createBuildTask(templateId) {
       return postJson<BuildTask>(fetcher, `${normalizedBaseUrl}/build-tasks`, { templateId })

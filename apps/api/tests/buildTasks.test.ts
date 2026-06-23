@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import {
+  BUILD_TEMPLATE_SCHEMA_VERSION,
   type BuildTemplate,
   createReferenceBuildTemplate,
 } from '@new-qp3d/shared'
@@ -45,6 +46,10 @@ function createTemplateStore(template: BuildTemplate | null): BuildTemplateStore
     create: async next => next,
     update: async (_id, next) => next,
     duplicate: async () => createReferenceBuildTemplate(),
+    export: async () => ({
+      schemaVersion: BUILD_TEMPLATE_SCHEMA_VERSION,
+      template: template ?? createReferenceBuildTemplate(),
+    }),
     import: async next => next,
   }
 }

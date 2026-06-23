@@ -52,6 +52,11 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
           },
         },
     createBuildTemplate: async template => template as never,
+    exportBuildTemplate: async () => ({
+      schemaVersion: 'build-template.v1',
+      template: createReferenceBuildTemplate(),
+    }),
+    importBuildTemplate: async input => 'template' in input ? input.template : input,
     createBuildTask: async () => ({
       id: 'build-1',
       templateId: 'template-1',
