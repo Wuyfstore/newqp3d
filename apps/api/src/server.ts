@@ -1,6 +1,7 @@
 import cors from '@fastify/cors'
 import Fastify from 'fastify'
 
+import { createAccessControl } from './accessControl.js'
 import { createFileTemplateStore } from './templates/fileTemplateStore.js'
 import { registerBuildTaskRoutes } from './routes/buildTasks.js'
 import { registerDatasourceRoutes } from './routes/datasource.js'
@@ -17,6 +18,7 @@ import type {
   BuildTemplateMigrationPackage,
   BuildTemplateStatus,
 } from '@new-qp3d/shared'
+import type { AccessControlOptions } from './accessControl.js'
 import type { BuildTaskRunner, BuildTaskStore } from './tasks/buildTaskTypes.js'
 
 export type {
@@ -116,6 +118,7 @@ export interface CreateServerOptions {
   templateStore?: BuildTemplateStore
   buildTaskStore?: BuildTaskStore
   buildTaskRunner?: BuildTaskRunner
+  accessControl?: AccessControlOptions
 }
 
 export async function createServer(repository: ApiRepository, options: CreateServerOptions = {}) {
@@ -123,16 +126,17 @@ export async function createServer(repository: ApiRepository, options: CreateSer
   const templateStore = options.templateStore ?? createFileTemplateStore()
   const buildTaskStore = options.buildTaskStore ?? createMemoryBuildTaskStore()
   const buildTaskRunner = options.buildTaskRunner ?? createCliBuildTaskRunner()
+  const accessControl = createAccessControl(options.accessControl)
 
   await app.register(cors, { origin: true })
-  await registerDatasourceRoutes(app, repository)
-  await registerPreflightRoutes(app, repository, templateStore)
-  await registerTemplateRoutes(app, templateStore)
-  await registerBuildTaskRoutes(app, repository, templateStore, buildTaskStore, buildTaskRunner)
-  await registerSearchRoutes(app, repository)
-  await registerDetailsRoutes(app, repository)
-  await registerVersionRoutes(app, repository)
-  await registerQualityRoutes(app, repository)
+  await registerDatasourceRoutes(app, repository, accessControl)
+  await registerPreflightRoutes(app, repository, templateStore, accessControl)
+  await registerTemplateRoutes(app, templateStore, accessControl)
+  await registerBuildTaskRoutes(app, repository, templateStore, buildTaskStore, buildTaskRunner, accessControl)
+  await registerSearchRoutes(app, repository, accessControl)
+  await registerDetailsRoutes(app, repository, accessControl)
+  await registerVersionRoutes(app, repository, accessControl)
+  await registerQualityRoutes(app, repository, accessControl)
 
   return app
 }

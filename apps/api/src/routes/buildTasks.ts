@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 
 import { runBuildTemplatePreflight } from '../preflight/buildTemplatePreflight.js'
+import type { AccessControl } from '../accessControl.js'
 import type { ApiRepository, BuildTemplateStore } from '../server.js'
 import type {
   BuildTask,
@@ -16,14 +17,17 @@ export async function registerBuildTaskRoutes(
   templateStore: BuildTemplateStore,
   taskStore: BuildTaskStore,
   runner: BuildTaskRunner,
+  accessControl: AccessControl,
 ): Promise<void> {
   const canceled = new Set<string>()
+  const requireTaskRead = accessControl.requireCapability('taskRead')
+  const requireTaskWrite = accessControl.requireCapability('taskWrite')
 
-  app.get('/api/build-tasks', async () => {
+  app.get('/api/build-tasks', { preHandler: requireTaskRead }, async () => {
     return { tasks: await taskStore.list() }
   })
 
-  app.get('/api/build-tasks/:id', async (request, reply) => {
+  app.get('/api/build-tasks/:id', { preHandler: requireTaskRead }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const task = await taskStore.get(id)
     if (task == null) {
@@ -32,7 +36,7 @@ export async function registerBuildTaskRoutes(
     return task
   })
 
-  app.post('/api/build-tasks', async (request, reply) => {
+  app.post('/api/build-tasks', { preHandler: requireTaskWrite }, async (request, reply) => {
     const body = (request.body ?? {}) as { templateId?: unknown }
     const templateId = typeof body.templateId === 'string' ? body.templateId.trim() : ''
     if (!templateId) {
@@ -57,7 +61,7 @@ export async function registerBuildTaskRoutes(
     return reply.code(201).send(task)
   })
 
-  app.post('/api/build-tasks/:id/cancel', async (request, reply) => {
+  app.post('/api/build-tasks/:id/cancel', { preHandler: requireTaskWrite }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const task = await taskStore.get(id)
     if (task == null) {

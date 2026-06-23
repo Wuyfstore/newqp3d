@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { BuildTemplate } from '@new-qp3d/shared'
+import type { AccessControl } from '../accessControl.js'
 import type { BuildTemplateStore } from '../server.js'
 import {
   TemplateConflictError,
@@ -7,12 +8,19 @@ import {
   TemplateValidationError,
 } from '../templates/fileTemplateStore.js'
 
-export async function registerTemplateRoutes(app: FastifyInstance, store: BuildTemplateStore): Promise<void> {
-  app.get('/api/build-templates', async () => {
+export async function registerTemplateRoutes(
+  app: FastifyInstance,
+  store: BuildTemplateStore,
+  accessControl: AccessControl,
+): Promise<void> {
+  const requireTemplateRead = accessControl.requireCapability('templateRead')
+  const requireTemplateWrite = accessControl.requireCapability('templateWrite')
+
+  app.get('/api/build-templates', { preHandler: requireTemplateRead }, async () => {
     return { templates: await store.list() }
   })
 
-  app.get('/api/build-templates/:id', async (request, reply) => {
+  app.get('/api/build-templates/:id', { preHandler: requireTemplateRead }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const template = await store.get(id)
 
@@ -23,7 +31,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, store: BuildT
     return template
   })
 
-  app.post('/api/build-templates', async (request, reply) => {
+  app.post('/api/build-templates', { preHandler: requireTemplateWrite }, async (request, reply) => {
     try {
       const template = await store.create(request.body as BuildTemplate)
       return reply.code(201).send(template)
@@ -32,7 +40,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, store: BuildT
     }
   })
 
-  app.put('/api/build-templates/:id', async (request, reply) => {
+  app.put('/api/build-templates/:id', { preHandler: requireTemplateWrite }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
       return await store.update(id, request.body as BuildTemplate)
@@ -41,7 +49,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, store: BuildT
     }
   })
 
-  app.post('/api/build-templates/:id/duplicate', async (request, reply) => {
+  app.post('/api/build-templates/:id/duplicate', { preHandler: requireTemplateWrite }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const body = (request.body ?? {}) as { id?: string; name?: string }
     try {
@@ -59,7 +67,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, store: BuildT
     }
   })
 
-  app.get('/api/build-templates/:id/export', async (request, reply) => {
+  app.get('/api/build-templates/:id/export', { preHandler: requireTemplateRead }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
       return await store.export(id)
@@ -68,7 +76,7 @@ export async function registerTemplateRoutes(app: FastifyInstance, store: BuildT
     }
   })
 
-  app.post('/api/build-templates/import', async (request, reply) => {
+  app.post('/api/build-templates/import', { preHandler: requireTemplateWrite }, async (request, reply) => {
     const body = (request.body ?? {}) as { dataSourceId?: unknown }
     try {
       const template = await store.import(

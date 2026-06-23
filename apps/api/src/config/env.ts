@@ -7,6 +7,7 @@ export interface ApiEnv {
   lineTable: string
   pointTable: string
   outputRoot: string
+  accessControlEnabled: boolean
   host: string
   port: number
 }
@@ -34,6 +35,7 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env, options: ReadEn
     lineTable: config.QP3D_LINE_TABLE ?? DEFAULT_LINE_TABLE,
     pointTable: config.QP3D_POINT_TABLE ?? DEFAULT_POINT_TABLE,
     outputRoot: resolveOutputRoot(config.QP3D_OUTPUT_ROOT ?? DEFAULT_OUTPUT_ROOT, config[QP3D_WORKSPACE_ROOT]),
+    accessControlEnabled: readBoolean(config.QP3D_ACCESS_CONTROL_ENABLED),
     host: config.HOST ?? DEFAULT_HOST,
     port: readPort(config.PORT),
   }
@@ -59,6 +61,22 @@ function readPort(value: string | undefined): number {
   }
 
   return port
+}
+
+function readBoolean(value: string | undefined): boolean {
+  if (value == null || value.trim() === '') {
+    return false
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
+    return true
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
+    return false
+  }
+
+  throw new Error(`Invalid boolean value: ${value}`)
 }
 
 function resolveOutputRoot(outputRoot: string, workspaceRoot: string | undefined): string {

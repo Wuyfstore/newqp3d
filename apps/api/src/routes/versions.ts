@@ -1,13 +1,21 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 
+import type { AccessControl } from '../accessControl.js'
 import type { ApiRepository } from '../server.js'
 
-export async function registerVersionRoutes(app: FastifyInstance, repository: ApiRepository): Promise<void> {
-  app.get('/api/versions', async () => {
+export async function registerVersionRoutes(
+  app: FastifyInstance,
+  repository: ApiRepository,
+  accessControl: AccessControl,
+): Promise<void> {
+  const requireVersionReport = accessControl.requireCapability('versionReport')
+  const requirePublish = accessControl.requireCapability('publish')
+
+  app.get('/api/versions', { preHandler: requireVersionReport }, async () => {
     return { versions: await repository.listVersions() }
   })
 
-  app.get('/api/versions/latest', async (_request, reply) => {
+  app.get('/api/versions/latest', { preHandler: requireVersionReport }, async (_request, reply) => {
     const latest = await repository.getLatestVersion()
 
     if (latest == null) {
@@ -17,7 +25,7 @@ export async function registerVersionRoutes(app: FastifyInstance, repository: Ap
     return latest
   })
 
-  app.get('/api/versions/:version', async (request, reply) => {
+  app.get('/api/versions/:version', { preHandler: requireVersionReport }, async (request, reply) => {
     const { version } = request.params as { version: string }
     const safeVersion = parseVersionParam(version, reply)
     if (safeVersion == null) {
@@ -32,7 +40,7 @@ export async function registerVersionRoutes(app: FastifyInstance, repository: Ap
     return manifest
   })
 
-  app.get('/api/versions/:version/quality-report', async (request, reply) => {
+  app.get('/api/versions/:version/quality-report', { preHandler: requireVersionReport }, async (request, reply) => {
     const { version } = request.params as { version: string }
     const safeVersion = parseVersionParam(version, reply)
     if (safeVersion == null) {
@@ -47,7 +55,7 @@ export async function registerVersionRoutes(app: FastifyInstance, repository: Ap
     return report
   })
 
-  app.get('/api/versions/:version/adaptation-report', async (request, reply) => {
+  app.get('/api/versions/:version/adaptation-report', { preHandler: requireVersionReport }, async (request, reply) => {
     const { version } = request.params as { version: string }
     const safeVersion = parseVersionParam(version, reply)
     if (safeVersion == null) {
@@ -62,7 +70,7 @@ export async function registerVersionRoutes(app: FastifyInstance, repository: Ap
     return report
   })
 
-  app.post('/api/versions/:version/publish', async (request, reply) => {
+  app.post('/api/versions/:version/publish', { preHandler: requirePublish }, async (request, reply) => {
     const { version } = request.params as { version: string }
     const safeVersion = parseVersionParam(version, reply)
     if (safeVersion == null) {
@@ -77,7 +85,7 @@ export async function registerVersionRoutes(app: FastifyInstance, repository: Ap
     return manifest
   })
 
-  app.post('/api/versions/:version/rollback', async (request, reply) => {
+  app.post('/api/versions/:version/rollback', { preHandler: requirePublish }, async (request, reply) => {
     const { version } = request.params as { version: string }
     const safeVersion = parseVersionParam(version, reply)
     if (safeVersion == null) {

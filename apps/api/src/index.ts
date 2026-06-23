@@ -13,6 +13,7 @@ export async function startApi(): Promise<void> {
   const env = readEnv()
   const app = await createServer(createPostgisRepository(env), {
     buildTaskRunner: createCliBuildTaskRunner({ outputRoot: env.outputRoot }),
+    accessControl: { enabled: env.accessControlEnabled },
   })
 
   await app.listen({ host: env.host, port: env.port })

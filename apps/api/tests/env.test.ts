@@ -31,6 +31,7 @@ describe('readEnv', () => {
       'QP3D_LINE_TABLE=public.file_line',
       'QP3D_POINT_TABLE=public.file_point',
       'QP3D_OUTPUT_ROOT=data/file-tiles',
+      'QP3D_ACCESS_CONTROL_ENABLED=true',
       'HOST=127.0.0.1',
       'PORT=4201',
     ].join('\n'))
@@ -40,9 +41,17 @@ describe('readEnv', () => {
       lineTable: 'public.file_line',
       pointTable: 'public.file_point',
       outputRoot: resolve(root, 'data/file-tiles'),
+      accessControlEnabled: true,
       host: '127.0.0.1',
       port: 4201,
     })
+  })
+
+  it('keeps role access control disabled unless explicitly enabled', () => {
+    const cwd = createIsolatedCwd()
+    expect(readEnv({
+      QP3D_DATABASE_URL: 'postgres://example.invalid/qp3d',
+    }, { cwd, processEnv: {} }).accessControlEnabled).toBe(false)
   })
 })
 

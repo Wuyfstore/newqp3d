@@ -4,14 +4,18 @@ import {
   BuildTemplatePreflightValidationError,
   runBuildTemplatePreflight,
 } from '../preflight/buildTemplatePreflight.js'
+import type { AccessControl } from '../accessControl.js'
 import type { ApiRepository, BuildTemplateStore } from '../server.js'
 
 export async function registerPreflightRoutes(
   app: FastifyInstance,
   repository: ApiRepository,
   templateStore: BuildTemplateStore,
+  accessControl: AccessControl,
 ): Promise<void> {
-  app.post('/api/build-templates/preflight', async (request, reply) => {
+  const requireTemplateWrite = accessControl.requireCapability('templateWrite')
+
+  app.post('/api/build-templates/preflight', { preHandler: requireTemplateWrite }, async (request, reply) => {
     try {
       return await runBuildTemplatePreflight(repository, request.body)
     } catch (error) {
@@ -26,7 +30,7 @@ export async function registerPreflightRoutes(
     }
   })
 
-  app.post('/api/build-templates/:id/preflight', async (request, reply) => {
+  app.post('/api/build-templates/:id/preflight', { preHandler: requireTemplateWrite }, async (request, reply) => {
     const { id } = request.params as { id: string }
     const template = await templateStore.get(id)
     if (template == null) {
