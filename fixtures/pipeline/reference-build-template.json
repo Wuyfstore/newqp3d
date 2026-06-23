@@ -1,0 +1,73 @@
+{
+  "id": "reference-liyang-drainage-network",
+  "name": "溧阳供排水管网参考模板",
+  "description": "覆盖当前参考线表和点表的参数化构建模板",
+  "version": "1.0.0",
+  "status": "draft",
+  "dataSourceId": "local-qcwebserver",
+  "lineTable": {
+    "schema": "public",
+    "table": "sys_016_tancexbtjinfo_sde",
+    "geometryField": "geom",
+    "fieldMapping": {
+      "id": "guid",
+      "startNodeId": "qdbm",
+      "endNodeId": "zdbm",
+      "pipeType": "gwlx",
+      "owner": "gs",
+      "material": "cz",
+      "spec": "gg",
+      "startInvertElevation": "qdndbg",
+      "endInvertElevation": "zdndbg",
+      "startDepth": "qdms",
+      "endDepth": "zdms",
+      "flowDirection": "lx",
+      "length": "gdcd"
+    }
+  },
+  "pointTable": {
+    "schema": "public",
+    "table": "sys_016_tancedbtjinfo_sde",
+    "geometryField": "geom",
+    "fieldMapping": {
+      "id": "gdbm",
+      "pointType": "lbmc",
+      "surfaceElevation": "dmbg",
+      "size": "jgcc",
+      "shape": "jgxz",
+      "depth": "js",
+      "material": "jgcz",
+      "spec": "gg",
+      "diameter": "kj"
+    }
+  },
+  "units": {
+    "pipeDiameter": "mm",
+    "pointSize": "m",
+    "elevation": "m",
+    "depth": "m",
+    "length": "m"
+  },
+  "defaults": {
+    "pipeDiameterMm": 600,
+    "depthM": 2,
+    "pointSizeM": 1,
+    "surfaceElevationM": 0
+  },
+  "flowRule": {
+    "field": "lx",
+    "forwardValues": ["1"],
+    "reverseValues": ["-1"],
+    "unknownStrategy": "reverse"
+  },
+  "lod": {
+    "maxFeaturesPerTile": 3000,
+    "maxTileBytes": 3500000,
+    "maxDepth": 8,
+    "radialSegments": 12
+  },
+  "output": {
+    "versionNameStrategy": "timestamp",
+    "includeAggregateMetadata": true
+  }
+}
