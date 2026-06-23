@@ -72,6 +72,41 @@ export interface DataSourceTableProfile {
   recommendedFieldMapping: Record<string, string>
 }
 
+export type BuildTaskStatus =
+  | 'queued'
+  | 'preprocessing'
+  | 'tiling'
+  | 'validating'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+
+export type BuildTaskLogLevel = 'info' | 'warn' | 'error'
+
+export interface BuildTaskLogEntry {
+  index: number
+  timestamp: string
+  level: BuildTaskLogLevel
+  message: string
+}
+
+export interface BuildTask {
+  id: string
+  templateId: string
+  templateName: string
+  templateVersion: string
+  status: BuildTaskStatus
+  progress: number
+  stagingDir: string
+  createdAt: string
+  updatedAt: string
+  startedAt?: string
+  completedAt?: string
+  outputVersion?: string
+  failureReason?: string
+  logs: BuildTaskLogEntry[]
+}
+
 export interface ApiClient {
   search(query: string): Promise<SearchResult[]>
   getLine(guid: string): Promise<PipeLineDetail>
@@ -82,6 +117,10 @@ export interface ApiClient {
   listTables(schema: string): Promise<DataSourceTable[]>
   getTableProfile(schema: string, table: string): Promise<DataSourceTableProfile>
   createBuildTemplate(template: unknown): Promise<BuildTemplate>
+  createBuildTask(templateId: string): Promise<BuildTask>
+  listBuildTasks(): Promise<BuildTask[]>
+  getBuildTask(id: string): Promise<BuildTask>
+  cancelBuildTask(id: string): Promise<BuildTask>
 }
 
 export type ApiFetcher = (input: string, init?: RequestInit) => Promise<Response>
@@ -128,6 +167,19 @@ export function createApiClient(baseUrl: string, fetcher: ApiFetcher = input => 
     },
     createBuildTemplate(template) {
       return postJson<BuildTemplate>(fetcher, `${normalizedBaseUrl}/build-templates`, template)
+    },
+    createBuildTask(templateId) {
+      return postJson<BuildTask>(fetcher, `${normalizedBaseUrl}/build-tasks`, { templateId })
+    },
+    async listBuildTasks() {
+      const response = await getJson<{ tasks: BuildTask[] }>(fetcher, `${normalizedBaseUrl}/build-tasks`)
+      return response.tasks
+    },
+    getBuildTask(id) {
+      return getJson<BuildTask>(fetcher, `${normalizedBaseUrl}/build-tasks/${encodeURIComponent(id)}`)
+    },
+    cancelBuildTask(id) {
+      return postJson<BuildTask>(fetcher, `${normalizedBaseUrl}/build-tasks/${encodeURIComponent(id)}/cancel`, {})
     },
   }
 }

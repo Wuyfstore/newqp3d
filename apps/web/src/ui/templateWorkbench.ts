@@ -10,6 +10,7 @@ const STYLE_ID = 'qp3d-template-workbench-styles'
 export interface TemplateWorkbenchOptions {
   apiClient: ApiClient
   dataSourceId: string
+  onTemplateSaved?: (template: BuildTemplate) => void
 }
 
 export interface TemplateWorkbench {
@@ -217,7 +218,8 @@ async function saveTemplate(
     },
   }
 
-  await options.apiClient.createBuildTemplate(template)
+  const savedTemplate = await options.apiClient.createBuildTemplate(template)
+  options.onTemplateSaved?.(savedTemplate)
   setStatus(element, '模板已保存')
 }
 

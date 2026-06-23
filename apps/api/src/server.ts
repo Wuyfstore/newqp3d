@@ -2,6 +2,7 @@ import cors from '@fastify/cors'
 import Fastify from 'fastify'
 
 import { createFileTemplateStore } from './templates/fileTemplateStore.js'
+import { registerBuildTaskRoutes } from './routes/buildTasks.js'
 import { registerDatasourceRoutes } from './routes/datasource.js'
 import { registerDetailsRoutes } from './routes/details.js'
 import { registerPreflightRoutes } from './routes/preflight.js'
@@ -9,7 +10,21 @@ import { registerQualityRoutes } from './routes/quality.js'
 import { registerSearchRoutes } from './routes/search.js'
 import { registerTemplateRoutes } from './routes/templates.js'
 import { registerVersionRoutes } from './routes/versions.js'
+import { createCliBuildTaskRunner } from './tasks/buildTaskRunner.js'
+import { createMemoryBuildTaskStore } from './tasks/buildTaskStore.js'
 import type { BuildTemplate, BuildTemplateStatus } from '@new-qp3d/shared'
+import type { BuildTaskRunner, BuildTaskStore } from './tasks/buildTaskTypes.js'
+
+export type {
+  BuildTask,
+  BuildTaskLogEntry,
+  BuildTaskLogLevel,
+  BuildTaskRunner,
+  BuildTaskRunnerContext,
+  BuildTaskRunnerResult,
+  BuildTaskStatus,
+  BuildTaskStore,
+} from './tasks/buildTaskTypes.js'
 
 export interface SearchResult {
   type: 'line' | 'point'
@@ -88,16 +103,21 @@ export interface BuildTemplateStore {
 
 export interface CreateServerOptions {
   templateStore?: BuildTemplateStore
+  buildTaskStore?: BuildTaskStore
+  buildTaskRunner?: BuildTaskRunner
 }
 
 export async function createServer(repository: ApiRepository, options: CreateServerOptions = {}) {
   const app = Fastify({ logger: false })
   const templateStore = options.templateStore ?? createFileTemplateStore()
+  const buildTaskStore = options.buildTaskStore ?? createMemoryBuildTaskStore()
+  const buildTaskRunner = options.buildTaskRunner ?? createCliBuildTaskRunner()
 
   await app.register(cors, { origin: true })
   await registerDatasourceRoutes(app, repository)
   await registerPreflightRoutes(app, repository, templateStore)
   await registerTemplateRoutes(app, templateStore)
+  await registerBuildTaskRoutes(app, repository, templateStore, buildTaskStore, buildTaskRunner)
   await registerSearchRoutes(app, repository)
   await registerDetailsRoutes(app, repository)
   await registerVersionRoutes(app, repository)

@@ -119,6 +119,102 @@ describe('api client', () => {
     })
   })
 
+  it('manages build task lifecycle endpoints', async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/build-tasks') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          id: 'build-1',
+          templateId: 'template-1',
+          templateName: '参数化模板',
+          templateVersion: '1.0.0',
+          status: 'queued',
+          progress: 0,
+          createdAt: '2026-06-23T00:00:00.000Z',
+          updatedAt: '2026-06-23T00:00:00.000Z',
+          stagingDir: '/tmp/build-1',
+          logs: [],
+        }), { status: 201 })
+      }
+
+      if (url.endsWith('/build-tasks')) {
+        return new Response(JSON.stringify({
+          tasks: [{
+            id: 'build-1',
+            templateId: 'template-1',
+            templateName: '参数化模板',
+            templateVersion: '1.0.0',
+            status: 'tiling',
+            progress: 60,
+            createdAt: '2026-06-23T00:00:00.000Z',
+            updatedAt: '2026-06-23T00:01:00.000Z',
+            stagingDir: '/tmp/build-1',
+            logs: [],
+          }],
+        }))
+      }
+
+      if (url.endsWith('/build-tasks/build%2F1/cancel')) {
+        return new Response(JSON.stringify({
+          id: 'build/1',
+          templateId: 'template-1',
+          templateName: '参数化模板',
+          templateVersion: '1.0.0',
+          status: 'canceled',
+          progress: 60,
+          createdAt: '2026-06-23T00:00:00.000Z',
+          updatedAt: '2026-06-23T00:01:00.000Z',
+          stagingDir: '/tmp/build-1',
+          logs: [{ index: 0, timestamp: '2026-06-23T00:01:00.000Z', level: 'warn', message: '取消任务，清理 staging 目录' }],
+        }))
+      }
+
+      return new Response(JSON.stringify({
+        id: 'build/1',
+        templateId: 'template-1',
+        templateName: '参数化模板',
+        templateVersion: '1.0.0',
+        status: 'completed',
+        progress: 100,
+        outputVersion: 'network-g8',
+        createdAt: '2026-06-23T00:00:00.000Z',
+        updatedAt: '2026-06-23T00:02:00.000Z',
+        stagingDir: '/tmp/build-1',
+        logs: [{ index: 0, timestamp: '2026-06-23T00:02:00.000Z', level: 'info', message: '瓦片写入完成' }],
+      }))
+    })
+    const api = createApiClient('/api/', fetcher)
+
+    await expect(api.createBuildTask('template-1')).resolves.toMatchObject({
+      id: 'build-1',
+      status: 'queued',
+    })
+    await expect(api.listBuildTasks()).resolves.toMatchObject([
+      { id: 'build-1', status: 'tiling', progress: 60 },
+    ])
+    await expect(api.getBuildTask('build/1')).resolves.toMatchObject({
+      id: 'build/1',
+      status: 'completed',
+      outputVersion: 'network-g8',
+    })
+    await expect(api.cancelBuildTask('build/1')).resolves.toMatchObject({
+      id: 'build/1',
+      status: 'canceled',
+    })
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/build-tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ templateId: 'template-1' }),
+    })
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/build-tasks')
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/build-tasks/build%2F1')
+    expect(fetcher).toHaveBeenNthCalledWith(4, '/api/build-tasks/build%2F1/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+  })
+
   it('throws a descriptive error when the API request fails', async () => {
     const fetcher = vi.fn(async () => new Response('missing', { status: 404, statusText: 'Not Found' }))
     const api = createApiClient('/api', fetcher)

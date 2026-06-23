@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { readEnv } from './config/env.js'
 import { createPostgisRepository } from './db/pool.js'
 import { createServer } from './server.js'
+import { createCliBuildTaskRunner } from './tasks/buildTaskRunner.js'
 
 export * from './config/env.js'
 export * from './db/pool.js'
@@ -10,7 +11,9 @@ export * from './server.js'
 
 export async function startApi(): Promise<void> {
   const env = readEnv()
-  const app = await createServer(createPostgisRepository(env))
+  const app = await createServer(createPostgisRepository(env), {
+    buildTaskRunner: createCliBuildTaskRunner({ outputRoot: env.outputRoot }),
+  })
 
   await app.listen({ host: env.host, port: env.port })
 }

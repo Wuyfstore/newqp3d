@@ -97,6 +97,28 @@ describe('pipeline CLI template builds', () => {
     expect(tileset.root.children.length).toBeGreaterThan(1)
   })
 
+  it('uses the requested build version for template PostGIS builds', async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-cli-template-version-'))
+    const template = createCliTemplate()
+
+    const { main } = await import('../src/cli.js')
+    await main([
+      'build',
+      '--source',
+      'postgis',
+      '--output',
+      outputRoot,
+      '--version',
+      'network-manual-template',
+      '--template',
+      JSON.stringify(template),
+    ])
+
+    const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as { version: string }
+    expect(latest.version).toBe('network-manual-template')
+    await expect(readFile(join(outputRoot, 'network-manual-template', 'tileset.json'), 'utf8')).resolves.toContain('asset')
+  })
+
   it('rejects invalid template JSON before constructing the datasource', async () => {
     const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-cli-template-invalid-'))
     const template = createCliTemplate()

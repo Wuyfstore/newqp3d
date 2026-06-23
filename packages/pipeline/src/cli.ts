@@ -204,7 +204,7 @@ async function build(options: Record<string, string | boolean>): Promise<void> {
 
   if (source === 'postgis') {
     const config = await loadPostgisBuildConfig(options, outputOption)
-    const published = await buildPostgis(config)
+    const published = await buildPostgis(config, stringOption(options, 'version'))
     console.log(JSON.stringify(published.latest, null, 2))
     return
   }
@@ -217,11 +217,12 @@ async function build(options: Record<string, string | boolean>): Promise<void> {
   console.log(JSON.stringify(published.latest, null, 2))
 }
 
-async function buildPostgis(config: PipelineConfig) {
+async function buildPostgis(config: PipelineConfig, version?: string) {
   return buildPostgisOverview({
     outputRoot: resolve(config.outputRoot),
     dataSource: new PostgisDataSource(config),
     expectedSrid: config.expectedSrid,
+    ...(version === undefined ? {} : { version }),
     ...(config.tileOptions === undefined ? {} : { tileOptions: config.tileOptions }),
     ...(config.template === undefined ? {} : { template: config.template }),
   })

@@ -47,6 +47,43 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
           },
         },
     createBuildTemplate: async template => template as never,
+    createBuildTask: async () => ({
+      id: 'build-1',
+      templateId: 'template-1',
+      templateName: '参数化模板',
+      templateVersion: '1.0.0',
+      status: 'queued',
+      progress: 0,
+      stagingDir: '/tmp/build-1',
+      createdAt: '2026-06-23T00:00:00.000Z',
+      updatedAt: '2026-06-23T00:00:00.000Z',
+      logs: [],
+    }),
+    listBuildTasks: async () => [],
+    getBuildTask: async id => ({
+      id,
+      templateId: 'template-1',
+      templateName: '参数化模板',
+      templateVersion: '1.0.0',
+      status: 'queued',
+      progress: 0,
+      stagingDir: '/tmp/build-1',
+      createdAt: '2026-06-23T00:00:00.000Z',
+      updatedAt: '2026-06-23T00:00:00.000Z',
+      logs: [],
+    }),
+    cancelBuildTask: async id => ({
+      id,
+      templateId: 'template-1',
+      templateName: '参数化模板',
+      templateVersion: '1.0.0',
+      status: 'canceled',
+      progress: 0,
+      stagingDir: '/tmp/build-1',
+      createdAt: '2026-06-23T00:00:00.000Z',
+      updatedAt: '2026-06-23T00:00:00.000Z',
+      logs: [],
+    }),
     ...overrides,
   }
 }
@@ -130,5 +167,31 @@ describe('template workbench', () => {
       lineTable: { fieldMapping: { id: 'custom_guid' } },
       pointTable: { fieldMapping: { id: 'custom_gdbm' } },
     })
+  })
+
+  it('notifies the app when a template is saved so builds can use that template', async () => {
+    const savedTemplates: unknown[] = []
+    const onTemplateSaved = vi.fn()
+    const workbench = createTemplateWorkbench({
+      apiClient: createApi({
+        createBuildTemplate: vi.fn(async template => {
+          savedTemplates.push(template)
+          return template as never
+        }),
+      }),
+      dataSourceId: 'local-qcwebserver',
+      onTemplateSaved,
+    })
+    document.body.replaceChildren(workbench.element)
+
+    await workbench.load()
+    workbench.element.querySelector<HTMLInputElement>('[data-template-name]')!.value = '当前构建模板'
+    workbench.element.querySelector<HTMLButtonElement>('[data-template-save]')!.click()
+    await vi.waitFor(() => expect(savedTemplates.length).toBe(1))
+
+    expect(onTemplateSaved).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'parametric-template',
+      name: '当前构建模板',
+    }))
   })
 })

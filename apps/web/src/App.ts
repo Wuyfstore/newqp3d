@@ -13,6 +13,7 @@ import {
   type LayerState,
 } from './state/layerState'
 import { installPanelStyles, renderEmptyPanel, renderPropertyPanel, renderQualitySummary } from './ui/panels'
+import { createBuildTaskCenter, type BuildTaskCenter } from './ui/buildTaskCenter'
 import { createTemplateWorkbench, type TemplateWorkbench } from './ui/templateWorkbench'
 
 export interface PipeNetworkApp {
@@ -50,6 +51,7 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
       <div class="qp3d-toolbar__section">
         <div class="qp3d-toolbar__title">构建</div>
         <button class="qp3d-toolbar__button" type="button" data-open-template-workbench>模板</button>
+        <button class="qp3d-toolbar__button" type="button" data-open-build-task-center>任务</button>
       </div>
     </aside>
     <aside class="qp3d-property-panel" hidden aria-hidden="true"></aside>
@@ -64,15 +66,38 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
   const viewer = createPipeNetworkViewer(viewerContainer)
   let handles: LayerHandles | undefined
   let templateWorkbench: TemplateWorkbench | undefined
+  let buildTaskCenter: BuildTaskCenter | undefined
+  let currentBuildTemplateId = 'reference-liyang-drainage-network'
   let disposed = false
 
   renderToolbar(shell, state, () => {
     handles?.applyState(state.snapshot())
   })
   installSearch(shell, viewer, apiClient, status, propertyPanel)
-  installTemplateWorkbench(shell, apiClient, status, propertyPanel, () => templateWorkbench, next => {
-    templateWorkbench = next
-  })
+  installTemplateWorkbench(
+    shell,
+    apiClient,
+    status,
+    propertyPanel,
+    () => templateWorkbench,
+    next => {
+      templateWorkbench = next
+    },
+    template => {
+      currentBuildTemplateId = template.id
+    },
+  )
+  installBuildTaskCenter(
+    shell,
+    apiClient,
+    status,
+    propertyPanel,
+    () => buildTaskCenter,
+    next => {
+      buildTaskCenter = next
+    },
+    () => currentBuildTemplateId,
+  )
 
   const disposePicking = installPicking(viewer, apiClient, {
     onPickStart() {
@@ -110,12 +135,50 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
     destroy() {
       disposed = true
       templateWorkbench?.destroy()
+      buildTaskCenter?.destroy()
       disposePicking()
       handles?.destroy()
       viewer.destroy()
       root.replaceChildren()
     },
   }
+}
+
+function installBuildTaskCenter(
+  shell: HTMLElement,
+  apiClient: ApiClient,
+  status: HTMLElement,
+  propertyPanel: HTMLElement,
+  getCenter: () => BuildTaskCenter | undefined,
+  setCenter: (center: BuildTaskCenter | undefined) => void,
+  getTemplateId: () => string,
+): void {
+  const button = requireElement<HTMLButtonElement>(shell, '[data-open-build-task-center]')
+  button.addEventListener('click', () => {
+    const existing = getCenter()
+    if (existing) {
+      showPanel(propertyPanel, existing.element)
+      status.textContent = 'build tasks: ready'
+      return
+    }
+
+    const center = createBuildTaskCenter({
+      apiClient,
+      getTemplateId,
+    })
+    setCenter(center)
+    showPanel(propertyPanel, center.element)
+    status.textContent = 'build tasks: loading'
+    void center.load()
+      .then(() => {
+        status.textContent = 'build tasks: ready'
+      })
+      .catch((error: unknown) => {
+        showPanel(propertyPanel, renderEmptyPanel(`任务加载失败: ${formatError(error)}`))
+        status.textContent = `build tasks: unavailable (${formatError(error)})`
+        setCenter(undefined)
+      })
+  })
 }
 
 function installTemplateWorkbench(
@@ -125,6 +188,7 @@ function installTemplateWorkbench(
   propertyPanel: HTMLElement,
   getWorkbench: () => TemplateWorkbench | undefined,
   setWorkbench: (workbench: TemplateWorkbench | undefined) => void,
+  onTemplateSaved: Parameters<typeof createTemplateWorkbench>[0]['onTemplateSaved'],
 ): void {
   const button = requireElement<HTMLButtonElement>(shell, '[data-open-template-workbench]')
   button.addEventListener('click', () => {
@@ -138,6 +202,7 @@ function installTemplateWorkbench(
     const workbench = createTemplateWorkbench({
       apiClient,
       dataSourceId: 'local-qcwebserver',
+      ...(onTemplateSaved === undefined ? {} : { onTemplateSaved }),
     })
     setWorkbench(workbench)
     showPanel(propertyPanel, workbench.element)
