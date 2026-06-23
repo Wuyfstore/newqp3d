@@ -11,6 +11,7 @@ import type { PipelineConfig } from './config.js'
 import type { BoundingVolumeBox, FeatureMetadata, TilesetChildInput } from './tiles/tilesetWriter.js'
 
 import { assertValidBuildTemplate, getPipeColor } from '@new-qp3d/shared'
+import { adaptPointFacilities, type AdaptedPoint, type PointLineAdaptationReport } from './adaptation/pointLineAdapter.js'
 import { loadPipelineConfig } from './config.js'
 import { PostgisDataSource } from './datasource/postgis.js'
 import { createGeoReference, sourceCoordinateToWgs84, type GeoReference, type Wgs84Position } from './geometry/georeference.js'
@@ -120,13 +121,16 @@ interface TiledFeatureFiles {
 interface ParsedLineFeature {
   metadata: FeatureMetadata
   coordinates: Wgs84Position[]
+  sourceCoordinates: Array<[number, number]>
   spec: ReturnType<typeof parsePipeSpec>
+  heights: ReturnType<typeof computePipeCenterHeights>
   flags: string[]
 }
 
 interface ParsedPointFeature {
   metadata: FeatureMetadata
   position: Wgs84Position
+  rawPosition: Wgs84Position
   flags: string[]
 }
 
@@ -138,6 +142,11 @@ interface LineBuildResult {
 interface PointBuildResult {
   feature: BuildFeature
   flags: string[]
+}
+
+interface AdaptationBuildOptions {
+  defaultPointSizeMeters: number
+  defaultSurfaceElevationMeters: number
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -302,6 +311,7 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
   })
   const lineParseOptions = createLineParseOptions(expectedSrid, input.template)
   const pointBuildOptions = createPointBuildOptions(input.template)
+  const adaptationBuildOptions = createAdaptationBuildOptions(input.template)
   const parsedLines: ParsedLineFeature[] = []
   const parsedPoints: ParsedPointFeature[] = []
   const flags: Array<{ featureId: string, flag: string }> = []
@@ -330,10 +340,12 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
     }
   }
 
-  const geoReference = createBuildGeoReference(parsedLines, parsedPoints)
+  const adaptation = adaptParsedPointFacilities(parsedLines, parsedPoints, adaptationBuildOptions)
+  const adaptedPoints = parsedPoints.map((point, index) => applyPointAdaptation(point, adaptation.points[index]))
+  const geoReference = createBuildGeoReference(parsedLines, adaptedPoints)
   const features = [
     ...parsedLines.map(line => buildLineFeature(line, geoReference, tileOptions)),
-    ...parsedPoints.map(point => buildPointFeature(point, geoReference, pointBuildOptions)),
+    ...adaptedPoints.map(point => buildPointFeature(point, geoReference, pointBuildOptions)),
   ]
   const metadata = features.map(({ metadata }) => metadata)
   const tiledFeatures = createTiledFeatureFiles(features, tileOptions)
@@ -372,6 +384,7 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
       'root.glb': writeGlb(createEmptyMesh(), []),
       'metadata.json': `${JSON.stringify(writeFeatureMetadataSidecar(metadata), null, 2)}\n`,
       'quality-report.json': `${JSON.stringify(qualityReport, null, 2)}\n`,
+      'adaptation-report.json': `${JSON.stringify(adaptation.report, null, 2)}\n`,
       '.flow-mode': 'embedded\n',
       ...tiledFeatures.files,
     },
@@ -451,7 +464,9 @@ function parseLineFeature(line: PipeLineRawRow, featureId: number, options: Line
 
   return {
     coordinates,
+    sourceCoordinates: geometry.coordinates.map(coordinate => [coordinate[0], coordinate[1]]),
     spec,
+    heights,
     metadata: {
       featureId,
       businessId: line.guid,
@@ -514,12 +529,15 @@ function parsePointFeature(
   ]
   const qualityStatus = flags.length > 0 ? 'abnormal' : 'normal'
 
+  const rawPosition = sourceCoordinateToWgs84([
+    geometry.coordinates[0],
+    geometry.coordinates[1],
+    finiteOrNull(point.dmbg) ?? 0,
+  ], geometry.srid ?? expectedSrid)
+
   return {
-    position: sourceCoordinateToWgs84([
-      geometry.coordinates[0],
-      geometry.coordinates[1],
-      finiteOrNull(point.dmbg) ?? 0,
-    ], geometry.srid ?? expectedSrid),
+    position: rawPosition,
+    rawPosition,
     metadata: {
       featureId,
       businessId,
@@ -543,6 +561,99 @@ function parsePointFeature(
     },
     flags,
   }
+}
+
+function createAdaptationBuildOptions(template: BuildTemplate | undefined): AdaptationBuildOptions {
+  return {
+    defaultPointSizeMeters: template?.defaults.pointSizeM ?? 3.2,
+    defaultSurfaceElevationMeters: template?.defaults.surfaceElevationM ?? 0,
+  }
+}
+
+function adaptParsedPointFacilities(
+  lines: ParsedLineFeature[],
+  points: ParsedPointFeature[],
+  options: AdaptationBuildOptions,
+): { points: AdaptedPoint[], report: PointLineAdaptationReport } {
+  return adaptPointFacilities({
+    defaults: {
+      pointSizeMeters: options.defaultPointSizeMeters,
+      surfaceElevationMeters: options.defaultSurfaceElevationMeters,
+    },
+    lines: lines.map(line => ({
+      id: line.metadata.businessId,
+      startNodeId: nullableString(line.metadata.properties.qdbm),
+      endNodeId: nullableString(line.metadata.properties.zdbm),
+      maxDiameterMeters: pipeSpecMaxDiameterMeters(line.spec),
+      startHeightMeters: lineEndpointElevation(line, 'start'),
+      endHeightMeters: lineEndpointElevation(line, 'end'),
+      coordinates: line.sourceCoordinates,
+    })),
+    points: points.map(point => ({
+      id: point.metadata.businessId,
+      code: nullableString(point.metadata.properties.gdbm),
+      pointType: nullablePointType(point.metadata.properties.pointType),
+      sizeMeters: finiteOrNull(point.metadata.properties.kj as number | null | undefined),
+      elevationMeters: finiteOrNull(point.metadata.properties.dmbg as number | null | undefined),
+    })),
+  })
+}
+
+function applyPointAdaptation(point: ParsedPointFeature, adaptation: AdaptedPoint | undefined): ParsedPointFeature {
+  if (!adaptation) {
+    return point
+  }
+
+  return {
+    ...point,
+    position: {
+      ...point.rawPosition,
+      height: adaptation.elevationMeters,
+    },
+    metadata: {
+      ...point.metadata,
+      properties: {
+        ...point.metadata.properties,
+        pointType: adaptation.pointType,
+        pipeType: adaptation.pointType,
+        dmbg: adaptation.elevationMeters,
+        kj: adaptation.sizeMeters,
+        pointTypeSource: adaptation.pointTypeSource,
+        pointSizeSource: adaptation.sizeSource,
+        elevationSource: adaptation.elevationSource,
+        connectionDegree: adaptation.connectionDegree,
+        connectedLineIds: adaptation.connectedLineIds,
+      },
+    },
+  }
+}
+
+function pipeSpecMaxDiameterMeters(spec: ReturnType<typeof parsePipeSpec>): number {
+  return spec.kind === 'round'
+    ? spec.diameterMm / 1000
+    : Math.max(spec.widthMm, spec.heightMm) / 1000
+}
+
+function lineEndpointElevation(line: ParsedLineFeature, endpoint: 'start' | 'end'): number {
+  const metadataValue = finiteOrNull(
+    endpoint === 'start'
+      ? line.metadata.properties.qdndbg as number | null | undefined
+      : line.metadata.properties.zdndbg as number | null | undefined,
+  )
+  if (metadataValue != null) {
+    return metadataValue
+  }
+
+  return endpoint === 'start' ? line.heights.startCenterZ : line.heights.endCenterZ
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null
+}
+
+function nullablePointType(value: unknown): string | null {
+  const normalized = nullableString(value)
+  return normalized && normalized !== '未知' ? normalized : null
 }
 
 function lineFlowDirection(

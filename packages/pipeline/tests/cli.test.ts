@@ -493,6 +493,111 @@ describe('buildPostgisOverview', () => {
     expect(metadata.features[0]?.properties.flowDirection).toBe('unknown')
     expect(mesh.texcoords?.[1]).toBe(-1)
   })
+
+  it('writes point-line adaptation metadata and report for missing point attributes', async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-postgis-adaptation-'))
+    const template = createReferenceBuildTemplate()
+    template.defaults = {
+      ...template.defaults,
+      pointSizeM: 1.2,
+      surfaceElevationM: 3,
+    }
+    const dataSource = {
+      async *readLines(): AsyncIterable<PipeLineRawRow> {
+        yield {
+          guid: 'line-adapt-1',
+          qdbm: 'A',
+          zdbm: 'B',
+          cz: null,
+          dmcc: 800,
+          gg: null,
+          qdms: null,
+          zdms: null,
+          qdndbg: 10,
+          zdndbg: 11,
+          gwlx: '雨水管',
+          gs: '市政',
+          msfs: null,
+          lx: '1',
+          gdsx: null,
+          gdcd: null,
+          geomWkbHex: lineStringEwkb([[119.38, 31.57], [119.381, 31.57]], 4326),
+        }
+      },
+      async *readPoints(): AsyncIterable<PointFacilityRawRow> {
+        yield {
+          gdbm: 'A',
+          hzb: null,
+          zzb: null,
+          lbmc: null,
+          dmbg: null,
+          kj: null,
+          js: null,
+          ms: null,
+          gg: null,
+          jgcz: null,
+          jgxz: null,
+          jgcc: null,
+          tag: null,
+          geomWkbHex: pointEwkb([119.38, 31.57], 4326),
+        }
+      },
+    }
+
+    await buildPostgisOverview({
+      outputRoot,
+      version: 'network-adaptation',
+      dataSource,
+      expectedSrid: 4326,
+      template,
+    })
+
+    const metadata = JSON.parse(
+      await readFile(join(outputRoot, 'network-adaptation', 'metadata.json'), 'utf8'),
+    ) as {
+      features: Array<{
+        businessId: string
+        properties: Record<string, unknown>
+      }>
+    }
+    const adaptationReport = JSON.parse(
+      await readFile(join(outputRoot, 'network-adaptation', 'adaptation-report.json'), 'utf8'),
+    ) as {
+      sourceCounts: {
+        pointType: Record<string, number>
+        pointSize: Record<string, number>
+        elevation: Record<string, number>
+      }
+      examples: Array<{ pointId: string, sources: Record<string, string> }>
+    }
+    const adaptedPoint = metadata.features.find(feature => feature.businessId === 'A')
+
+    expect(adaptedPoint?.properties).toEqual(expect.objectContaining({
+      pointType: '端点',
+      pointTypeSource: 'topology-degree',
+      pointSizeSource: 'adjacent-line',
+      elevationSource: 'line-endpoint',
+      connectionDegree: 1,
+      connectedLineIds: ['line-adapt-1'],
+      dmbg: 10,
+      kj: 0.8,
+    }))
+    expect(adaptationReport.sourceCounts).toEqual({
+      pointType: { 'topology-degree': 1 },
+      pointSize: { 'adjacent-line': 1 },
+      elevation: { 'line-endpoint': 1 },
+    })
+    expect(adaptationReport.examples).toEqual([
+      expect.objectContaining({
+        pointId: 'A',
+        sources: {
+          pointType: 'topology-degree',
+          pointSize: 'adjacent-line',
+          elevation: 'line-endpoint',
+        },
+      }),
+    ])
+  })
 })
 
 function totalTriangleArea(mesh: Mesh): number {
