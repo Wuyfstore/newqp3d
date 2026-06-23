@@ -55,6 +55,10 @@ describe('installPicking', () => {
       getPoint: vi.fn(),
       getLatestVersion: vi.fn(),
       getLatestQuality: vi.fn(),
+      listSchemas: vi.fn(),
+      listTables: vi.fn(),
+      getTableProfile: vi.fn(),
+      createBuildTemplate: vi.fn(),
     }
     const onPick = vi.fn()
 

@@ -13,6 +13,7 @@ import {
   type LayerState,
 } from './state/layerState'
 import { installPanelStyles, renderEmptyPanel, renderPropertyPanel, renderQualitySummary } from './ui/panels'
+import { createTemplateWorkbench, type TemplateWorkbench } from './ui/templateWorkbench'
 
 export interface PipeNetworkApp {
   destroy(): void
@@ -46,6 +47,10 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
         <div class="qp3d-toolbar__title">质量</div>
         <div data-quality></div>
       </div>
+      <div class="qp3d-toolbar__section">
+        <div class="qp3d-toolbar__title">构建</div>
+        <button class="qp3d-toolbar__button" type="button" data-open-template-workbench>模板</button>
+      </div>
     </aside>
     <aside class="qp3d-property-panel" hidden aria-hidden="true"></aside>
     <footer class="qp3d-status" data-status>tileset: loading</footer>
@@ -58,12 +63,16 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
   const propertyPanel = requireElement<HTMLElement>(shell, '.qp3d-property-panel')
   const viewer = createPipeNetworkViewer(viewerContainer)
   let handles: LayerHandles | undefined
+  let templateWorkbench: TemplateWorkbench | undefined
   let disposed = false
 
   renderToolbar(shell, state, () => {
     handles?.applyState(state.snapshot())
   })
   installSearch(shell, viewer, apiClient, status, propertyPanel)
+  installTemplateWorkbench(shell, apiClient, status, propertyPanel, () => templateWorkbench, next => {
+    templateWorkbench = next
+  })
 
   const disposePicking = installPicking(viewer, apiClient, {
     onPickStart() {
@@ -100,12 +109,49 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
   return {
     destroy() {
       disposed = true
+      templateWorkbench?.destroy()
       disposePicking()
       handles?.destroy()
       viewer.destroy()
       root.replaceChildren()
     },
   }
+}
+
+function installTemplateWorkbench(
+  shell: HTMLElement,
+  apiClient: ApiClient,
+  status: HTMLElement,
+  propertyPanel: HTMLElement,
+  getWorkbench: () => TemplateWorkbench | undefined,
+  setWorkbench: (workbench: TemplateWorkbench | undefined) => void,
+): void {
+  const button = requireElement<HTMLButtonElement>(shell, '[data-open-template-workbench]')
+  button.addEventListener('click', () => {
+    const existing = getWorkbench()
+    if (existing) {
+      showPanel(propertyPanel, existing.element)
+      status.textContent = 'template: ready'
+      return
+    }
+
+    const workbench = createTemplateWorkbench({
+      apiClient,
+      dataSourceId: 'local-qcwebserver',
+    })
+    setWorkbench(workbench)
+    showPanel(propertyPanel, workbench.element)
+    status.textContent = 'template: loading'
+    void workbench.load()
+      .then(() => {
+        status.textContent = 'template: ready'
+      })
+      .catch((error: unknown) => {
+        showPanel(propertyPanel, renderEmptyPanel(`模板加载失败: ${formatError(error)}`))
+        status.textContent = `template: unavailable (${formatError(error)})`
+        setWorkbench(undefined)
+      })
+  })
 }
 
 async function loadLatestVersion(

@@ -71,6 +71,18 @@ body,
   color: #9fb3c8;
 }
 
+.qp3d-toolbar__button {
+  width: 100%;
+  min-height: 28px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: #f3f7fb;
+  background: rgb(255 255 255 / 8%);
+  font: inherit;
+  cursor: pointer;
+}
+
 .qp3d-check-row {
   display: grid;
   grid-template-columns: 18px 1fr;
