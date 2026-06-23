@@ -54,6 +54,14 @@ pnpm install
 
 ## 快速启动
 
+所有命令都在项目根目录执行。当前最终版本所在目录是：
+
+```powershell
+cd D:\Workspace\Personal\new-qp3d\.worktrees\cesium-pipe-network-clean
+```
+
+判断是否在正确目录：该目录下应能看到 `package.json`、`pnpm-workspace.yaml`、`apps/`、`packages/` 和 `config/`。
+
 ### 1. 构建示例瓦片
 
 示例数据不需要连接数据库，适合先验证项目是否能跑通。
@@ -117,6 +125,7 @@ QP3D_LINE_TABLE=public.sys_016_tancexbtjinfo_sde
 QP3D_POINT_TABLE=public.sys_016_tancedbtjinfo_sde
 QP3D_EXPECTED_SRID=3857
 QP3D_OUTPUT_ROOT=data/tiles
+QP3D_ACCESS_CONTROL_ENABLED=false
 HOST=0.0.0.0
 PORT=4100
 ```
@@ -231,6 +240,7 @@ QP3D_LINE_TABLE       管线表，默认 public.sys_016_tancexbtjinfo_sde
 QP3D_POINT_TABLE      点设施表，默认 public.sys_016_tancedbtjinfo_sde
 QP3D_EXPECTED_SRID    期望 SRID，默认 3857，用于 pipeline 质量校验
 QP3D_OUTPUT_ROOT      瓦片输出目录，默认 data/tiles
+QP3D_ACCESS_CONTROL_ENABLED  是否启用 API 角色权限，默认 false；启用后请求需带 x-qp3d-role
 HOST                  API 监听地址，默认 0.0.0.0
 PORT                  API 监听端口，默认 4100
 ```
