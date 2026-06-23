@@ -178,6 +178,103 @@ describe('build task center', () => {
     expect(center.element.querySelector('[data-build-task-publish]')).not.toBeNull()
   })
 
+  it('compares the latest two build versions by quality metrics', async () => {
+    const getQualityReport = vi.fn(async (version: string) => version === 'network-new'
+      ? {
+          versionId: 'network-new',
+          recordCount: 20,
+          successCount: 18,
+          failureCount: 2,
+          totalLines: 12,
+          totalPoints: 8,
+          flagCounts: { 'spec-defaulted': 3 },
+          specParsingStats: { parsed: 9, defaulted: 3 },
+          elevationSourceStats: { 'line-endpoint': 6, default: 2 },
+          pointSizeSourceStats: { 'adjacent-line': 5 },
+          pointLineMatchStats: { 'node-match-code': 7, 'node-match-nearest': 1 },
+          tileStats: { count: 5, maxBytes: 6144, averageBytes: 2048 },
+        }
+      : {
+          versionId: 'network-old',
+          recordCount: 14,
+          successCount: 13,
+          failureCount: 1,
+          totalLines: 9,
+          totalPoints: 5,
+          flagCounts: { 'spec-defaulted': 1 },
+          specParsingStats: { parsed: 8, defaulted: 1 },
+          elevationSourceStats: { 'line-endpoint': 4, default: 1 },
+          pointSizeSourceStats: { 'adjacent-line': 3 },
+          pointLineMatchStats: { 'node-match-code': 5, 'node-match-nearest': 0 },
+          tileStats: { count: 3, maxBytes: 4096, averageBytes: 1024 },
+        })
+    const api = createApi({
+      listBuildTasks: vi.fn(async () => []),
+      listVersions: vi.fn(async () => [
+        { version: 'network-new', status: 'ready' as const, tilesetUrl: '/tiles/network-new/tileset.json' },
+        { version: 'network-old', status: 'superseded' as const, tilesetUrl: '/tiles/network-old/tileset.json' },
+      ]),
+      getQualityReport,
+    })
+    const center = createBuildTaskCenter({ apiClient: api, templateId: 'template-1' })
+    document.body.replaceChildren(center.element)
+
+    await center.load()
+    center.element.querySelector<HTMLButtonElement>('[data-version-compare]')!.click()
+    await vi.waitFor(() => expect(getQualityReport).toHaveBeenCalledWith('network-old'))
+    await vi.waitFor(() => expect(getQualityReport).toHaveBeenCalledWith('network-new'))
+
+    expect(center.element.textContent).toContain('版本差异')
+    expect(center.element.textContent).toContain('network-new - network-old')
+    expect(center.element.textContent).toContain('记录数')
+    expect(center.element.textContent).toContain('+6')
+    expect(center.element.textContent).toContain('异常数')
+    expect(center.element.textContent).toContain('+1')
+    expect(center.element.textContent).toContain('Tile 数')
+    expect(center.element.textContent).toContain('+2')
+    expect(center.element.textContent).toContain('最大 Tile')
+    expect(center.element.textContent).toContain('+2048')
+    expect(center.element.textContent).toContain('质量标记')
+    expect(center.element.textContent).toContain('+2')
+    expect(center.element.textContent).toContain('规格解析 defaulted')
+    expect(center.element.textContent).toContain('高程来源 line-endpoint')
+    expect(center.element.textContent).toContain('点尺寸来源 adjacent-line')
+    expect(center.element.textContent).toContain('点线匹配 node-match-nearest')
+  })
+
+  it('clears stale version comparison when report loading fails', async () => {
+    let shouldFail = false
+    const getQualityReport = vi.fn(async (version: string) => {
+      if (shouldFail) {
+        throw new Error('quality missing')
+      }
+
+      return version === 'network-new'
+        ? { versionId: version, recordCount: 2, failureCount: 1, flagCounts: { warning: 1 } }
+        : { versionId: version, recordCount: 1, failureCount: 0, flagCounts: {} }
+    })
+    const api = createApi({
+      listBuildTasks: vi.fn(async () => []),
+      listVersions: vi.fn(async () => [
+        { version: 'network-new', status: 'ready' as const, tilesetUrl: '/tiles/network-new/tileset.json' },
+        { version: 'network-old', status: 'superseded' as const, tilesetUrl: '/tiles/network-old/tileset.json' },
+      ]),
+      getQualityReport,
+    })
+    const center = createBuildTaskCenter({ apiClient: api, templateId: 'template-1' })
+    document.body.replaceChildren(center.element)
+
+    await center.load()
+    center.element.querySelector<HTMLButtonElement>('[data-version-compare]')!.click()
+    await vi.waitFor(() => expect(center.element.querySelector('[data-version-comparison]')).not.toBeNull())
+
+    shouldFail = true
+    center.element.querySelector<HTMLButtonElement>('[data-version-compare]')!.click()
+    await vi.waitFor(() => expect(center.element.textContent).toContain('版本差异失败: quality missing'))
+
+    expect(center.element.querySelector('[data-version-comparison]')).toBeNull()
+  })
+
   it('keeps publish actions available when task preview fails', async () => {
     const onVersionPreview = vi.fn(async () => {
       throw new Error('tileset missing')

@@ -1,4 +1,4 @@
-import type { ApiClient, BuildTask, BuildTaskStatus, BuildVersionRecord } from '../services/apiClient'
+import type { ApiClient, BuildTask, BuildTaskStatus, BuildVersionRecord, QualityReport } from '../services/apiClient'
 
 const STYLE_ID = 'qp3d-build-task-center-styles'
 
@@ -123,6 +123,28 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     setStatus(element, `版本预览中: ${version}`)
   }
 
+  async function compareLatestVersions(): Promise<void> {
+    const [current, baseline] = versions
+    if (current == null || baseline == null) {
+      setStatus(element, '至少需要两个版本才能对比')
+      return
+    }
+
+    setStatus(element, '版本差异加载中')
+    clearVersionComparison(element)
+    const [currentQuality, baselineQuality] = await Promise.all([
+      options.apiClient.getQualityReport(current.version),
+      options.apiClient.getQualityReport(baseline.version),
+    ])
+    renderVersionComparison(element, {
+      current: current.version,
+      baseline: baseline.version,
+      currentQuality,
+      baselineQuality,
+    })
+    setStatus(element, `版本差异: ${current.version} - ${baseline.version}`)
+  }
+
   element.addEventListener('click', event => {
     const target = event.target
     if (!(target instanceof HTMLElement)) {
@@ -170,6 +192,12 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     if (rollbackButton) {
       void rollbackVersion(rollbackButton.dataset.versionRollbackId ?? '')
         .catch(error => setStatus(element, `版本回滚失败: ${formatError(error)}`))
+      return
+    }
+
+    if (target.matches('[data-version-compare]')) {
+      void compareLatestVersions()
+        .catch(error => setStatus(element, `版本差异失败: ${formatError(error)}`))
     }
   })
 
@@ -360,6 +388,14 @@ function renderVersionHistory(versions: BuildVersionRecord[]): HTMLElement {
     return section
   }
 
+  if (versions.length >= 2) {
+    const compare = document.createElement('button')
+    compare.type = 'button'
+    compare.setAttribute('data-version-compare', '')
+    compare.textContent = '对比最近两版'
+    section.append(compare)
+  }
+
   const list = document.createElement('div')
   list.className = 'qp3d-build-task-center__version-list'
   for (const version of versions.slice(0, 8)) {
@@ -379,6 +415,83 @@ function renderVersionHistory(versions: BuildVersionRecord[]): HTMLElement {
   }
   section.append(list)
   return section
+}
+
+interface VersionComparisonInput {
+  current: string
+  baseline: string
+  currentQuality: QualityReport
+  baselineQuality: QualityReport
+}
+
+function renderVersionComparison(element: HTMLElement, input: VersionComparisonInput): void {
+  const detail = requireElement<HTMLElement>(element, '[data-build-task-detail]')
+  clearVersionComparison(element)
+
+  const section = document.createElement('div')
+  section.className = 'qp3d-build-task-center__comparison'
+  section.setAttribute('data-version-comparison', '')
+
+  const title = document.createElement('div')
+  title.className = 'qp3d-build-task-center__log-title'
+  title.textContent = '版本差异'
+  const subtitle = document.createElement('div')
+  subtitle.className = 'qp3d-build-task-center__empty'
+  subtitle.textContent = `${input.current} - ${input.baseline}`
+
+  const rows = document.createElement('dl')
+  rows.className = 'qp3d-build-task-center__rows'
+  for (const [label, current, baseline] of collectComparisonRows(input)) {
+    const term = document.createElement('dt')
+    term.textContent = label
+    const description = document.createElement('dd')
+    description.textContent = `${formatSignedDelta(current - baseline)} (${current} / ${baseline})`
+    rows.append(term, description)
+  }
+
+  section.append(title, subtitle, rows)
+  const versionsSection = detail.querySelector('.qp3d-build-task-center__versions')
+  if (versionsSection) {
+    detail.insertBefore(section, versionsSection)
+    return
+  }
+
+  detail.append(section)
+}
+
+function collectComparisonRows(input: VersionComparisonInput): Array<[string, number, number]> {
+  const currentFlagCount = sumRecord(input.currentQuality.flagCounts)
+  const baselineFlagCount = sumRecord(input.baselineQuality.flagCounts)
+  const rows: Array<[string, number, number]> = [
+    ['记录数', numericMetric(input.currentQuality.recordCount), numericMetric(input.baselineQuality.recordCount)],
+    ['异常数', numericMetric(input.currentQuality.failureCount), numericMetric(input.baselineQuality.failureCount)],
+    ['Tile 数', numericMetric(input.currentQuality.tileStats?.count), numericMetric(input.baselineQuality.tileStats?.count)],
+    ['最大 Tile', numericMetric(input.currentQuality.tileStats?.maxBytes), numericMetric(input.baselineQuality.tileStats?.maxBytes)],
+    ['质量标记', currentFlagCount, baselineFlagCount],
+  ]
+  rows.push(...collectRecordComparisonRows('规格解析', input.currentQuality.specParsingStats, input.baselineQuality.specParsingStats))
+  rows.push(...collectRecordComparisonRows('高程来源', input.currentQuality.elevationSourceStats, input.baselineQuality.elevationSourceStats))
+  rows.push(...collectRecordComparisonRows('点尺寸来源', input.currentQuality.pointSizeSourceStats, input.baselineQuality.pointSizeSourceStats))
+  rows.push(...collectRecordComparisonRows('点线匹配', input.currentQuality.pointLineMatchStats, input.baselineQuality.pointLineMatchStats))
+  rows.push(...collectRecordComparisonRows('质量标记', input.currentQuality.flagCounts, input.baselineQuality.flagCounts))
+  rows.push(...collectRecordComparisonRows('质量摘要', input.currentQuality.summary, input.baselineQuality.summary))
+  return rows
+}
+
+function clearVersionComparison(element: HTMLElement): void {
+  const detail = requireElement<HTMLElement>(element, '[data-build-task-detail]')
+  detail.querySelector('[data-version-comparison]')?.remove()
+}
+
+function collectRecordComparisonRows(
+  label: string,
+  current: Record<string, unknown> | undefined,
+  baseline: Record<string, unknown> | undefined,
+): Array<[string, number, number]> {
+  const keys = new Set([...Object.keys(current ?? {}), ...Object.keys(baseline ?? {})])
+  return [...keys]
+    .sort()
+    .map(key => [`${label} ${key}`, numericMetric(current?.[key]), numericMetric(baseline?.[key])])
 }
 
 function upsertTask(tasks: BuildTask[], task: BuildTask): BuildTask[] {
@@ -449,6 +562,26 @@ function formatValue(value: unknown): string {
   }
 
   return JSON.stringify(value)
+}
+
+function numericMetric(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function sumRecord(record: Record<string, unknown> | undefined): number {
+  if (record == null) {
+    return 0
+  }
+
+  return Object.values(record).reduce<number>((sum, value) => sum + numericMetric(value), 0)
+}
+
+function formatSignedDelta(value: number): string {
+  if (!Number.isFinite(value) || value === 0) {
+    return '0'
+  }
+
+  return value > 0 ? `+${value}` : String(value)
 }
 
 function setStatus(element: HTMLElement, message: string): void {
