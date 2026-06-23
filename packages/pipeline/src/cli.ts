@@ -126,7 +126,6 @@ interface TiledFeatureFiles {
 interface ParsedLineFeature {
   metadata: FeatureMetadata
   coordinates: Wgs84Position[]
-  sourceCoordinates: Array<[number, number]>
   spec: ReturnType<typeof parsePipeSpec>
   heights: ReturnType<typeof computePipeCenterHeights>
   flags: string[]
@@ -152,6 +151,7 @@ interface PointBuildResult {
 interface AdaptationBuildOptions {
   defaultPointSizeMeters: number
   defaultSurfaceElevationMeters: number
+  nearestPointMatchToleranceMeters: number
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -350,9 +350,9 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
     }
   }
 
-  const adaptation = adaptParsedPointFacilities(parsedLines, parsedPoints, adaptationBuildOptions)
+  const geoReference = createBuildGeoReference(parsedLines, parsedPoints)
+  const adaptation = adaptParsedPointFacilities(parsedLines, parsedPoints, adaptationBuildOptions, geoReference)
   const adaptedPoints = parsedPoints.map((point, index) => applyPointAdaptation(point, adaptation.points[index]))
-  const geoReference = createBuildGeoReference(parsedLines, adaptedPoints)
   const features = [
     ...parsedLines.map(line => buildLineFeature(line, geoReference, tileOptions)),
     ...adaptedPoints.map(point => buildPointFeature(point, geoReference, pointBuildOptions)),
@@ -495,7 +495,6 @@ function parseLineFeature(line: PipeLineRawRow, featureId: number, options: Line
 
   return {
     coordinates,
-    sourceCoordinates: geometry.coordinates.map(coordinate => [coordinate[0], coordinate[1]]),
     spec,
     heights,
     metadata: {
@@ -598,6 +597,7 @@ function createAdaptationBuildOptions(template: BuildTemplate | undefined): Adap
   return {
     defaultPointSizeMeters: template?.defaults.pointSizeM ?? 3.2,
     defaultSurfaceElevationMeters: template?.defaults.surfaceElevationM ?? 0,
+    nearestPointMatchToleranceMeters: template?.defaults.nearestPointMatchToleranceM ?? 0,
   }
 }
 
@@ -605,6 +605,7 @@ function adaptParsedPointFacilities(
   lines: ParsedLineFeature[],
   points: ParsedPointFeature[],
   options: AdaptationBuildOptions,
+  geoReference: GeoReference | undefined,
 ): { points: AdaptedPoint[], report: PointLineAdaptationReport } {
   return adaptPointFacilities({
     defaults: {
@@ -618,7 +619,7 @@ function adaptParsedPointFacilities(
       maxDiameterMeters: pipeSpecMaxDiameterMeters(line.spec),
       startHeightMeters: lineEndpointElevation(line, 'start'),
       endHeightMeters: lineEndpointElevation(line, 'end'),
-      coordinates: line.sourceCoordinates,
+      coordinates: line.coordinates.map(coordinate => toPlanarCoordinate(coordinate, geoReference)),
     })),
     points: points.map(point => ({
       id: point.metadata.businessId,
@@ -626,8 +627,17 @@ function adaptParsedPointFacilities(
       pointType: nullablePointType(point.metadata.properties.pointType),
       sizeMeters: finiteOrNull(point.metadata.properties.kj as number | null | undefined),
       elevationMeters: finiteOrNull(point.metadata.properties.dmbg as number | null | undefined),
+      coordinates: toPlanarCoordinate(point.rawPosition, geoReference),
     })),
+    nearestMatch: {
+      toleranceMeters: options.nearestPointMatchToleranceMeters,
+    },
   })
+}
+
+function toPlanarCoordinate(position: Wgs84Position, geoReference: GeoReference | undefined): [number, number] {
+  const local = toMeshCoordinate(position, geoReference)
+  return [local[0], local[1]]
 }
 
 function applyPointAdaptation(point: ParsedPointFeature, adaptation: AdaptedPoint | undefined): ParsedPointFeature {
@@ -654,6 +664,10 @@ function applyPointAdaptation(point: ParsedPointFeature, adaptation: AdaptedPoin
         elevationSource: adaptation.elevationSource,
         connectionDegree: adaptation.connectionDegree,
         connectedLineIds: adaptation.connectedLineIds,
+        nodeMatchSource: adaptation.nodeMatchSource,
+        ...(adaptation.nearestMatchDistanceMeters === undefined
+          ? {}
+          : { nearestMatchDistanceMeters: adaptation.nearestMatchDistanceMeters }),
       },
     },
   }

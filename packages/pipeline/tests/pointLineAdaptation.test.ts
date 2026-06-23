@@ -147,6 +147,114 @@ describe('adaptPointFacilities', () => {
       四通: 1,
     })
   })
+
+  it('matches unmatched line endpoints to nearby points inside the configured tolerance', () => {
+    const result = adaptPointFacilities({
+      defaults: {
+        pointSizeMeters: 1,
+        surfaceElevationMeters: 0,
+      },
+      nearestMatch: {
+        toleranceMeters: 1,
+      },
+      lines: [
+        {
+          id: 'L-near',
+          startNodeId: 'missing-start',
+          endNodeId: 'missing-end',
+          maxDiameterMeters: 0.9,
+          startHeightMeters: 12,
+          endHeightMeters: 13,
+          coordinates: [[0, 0], [10, 0]],
+        },
+      ],
+      points: [
+        {
+          id: 'P-near-start',
+          code: 'different-start-code',
+          pointType: null,
+          sizeMeters: null,
+          elevationMeters: null,
+          coordinates: [0.4, 0.3],
+        },
+        {
+          id: 'P-near-end',
+          code: null,
+          pointType: null,
+          sizeMeters: null,
+          elevationMeters: null,
+          coordinates: [10.2, 0],
+        },
+      ],
+    })
+
+    expect(result.points).toEqual([
+      expect.objectContaining({
+        id: 'P-near-start',
+        connectionDegree: 1,
+        connectedLineIds: ['L-near'],
+        nodeMatchSource: 'node-match-nearest',
+        nearestMatchDistanceMeters: expect.closeTo(0.5, 5),
+        elevationMeters: 12,
+      }),
+      expect.objectContaining({
+        id: 'P-near-end',
+        connectionDegree: 1,
+        connectedLineIds: ['L-near'],
+        nodeMatchSource: 'node-match-nearest',
+        nearestMatchDistanceMeters: expect.closeTo(0.2, 5),
+        elevationMeters: 13,
+      }),
+    ])
+    expect(result.report.matchSourceCounts).toEqual({
+      'node-match-nearest': 2,
+    })
+    expect(result.report.nearestMatchConflicts).toEqual([])
+  })
+
+  it('reports nearest-match conflicts without connecting ambiguous candidates', () => {
+    const result = adaptPointFacilities({
+      defaults: {
+        pointSizeMeters: 1,
+        surfaceElevationMeters: 0,
+      },
+      nearestMatch: {
+        toleranceMeters: 1,
+      },
+      lines: [
+        line('L-conflict', 'missing-start', 'outside', [[0, 0], [10, 0]]),
+      ],
+      points: [
+        {
+          id: 'P-a',
+          code: null,
+          pointType: null,
+          sizeMeters: null,
+          elevationMeters: null,
+          coordinates: [0.2, 0],
+        },
+        {
+          id: 'P-b',
+          code: null,
+          pointType: null,
+          sizeMeters: null,
+          elevationMeters: null,
+          coordinates: [0.4, 0],
+        },
+      ],
+    })
+
+    expect(result.points.map(point => point.connectionDegree)).toEqual([0, 0])
+    expect(result.report.matchSourceCounts).toEqual({})
+    expect(result.report.nearestMatchConflicts).toEqual([
+      {
+        lineId: 'L-conflict',
+        endpoint: 'start',
+        candidatePointIds: ['P-a', 'P-b'],
+        toleranceMeters: 1,
+      },
+    ])
+  })
 })
 
 function line(

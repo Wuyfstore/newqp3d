@@ -1,6 +1,9 @@
 export type PointTypeSource = 'field' | 'topology-degree' | 'default'
 export type PointSizeSource = 'field' | 'adjacent-line' | 'type-default'
 export type PointElevationSource = 'field' | 'line-endpoint' | 'default'
+export type NodeMatchReportSource = 'node-match-code' | 'node-match-nearest'
+export type NodeMatchSource = NodeMatchReportSource | 'none'
+type NodeConnectionMatchSource = 'code' | 'nearest'
 
 export interface AdaptationDefaults {
   pointSizeMeters: number
@@ -23,6 +26,7 @@ export interface AdaptablePoint {
   pointType: string | null
   sizeMeters: number | null
   elevationMeters: number | null
+  coordinates?: [number, number]
 }
 
 export interface AdaptedPoint {
@@ -36,6 +40,8 @@ export interface AdaptedPoint {
   elevationSource: PointElevationSource
   connectionDegree: number
   connectedLineIds: string[]
+  nodeMatchSource: NodeMatchSource
+  nearestMatchDistanceMeters?: number
 }
 
 export interface PointLineAdaptationReport {
@@ -46,8 +52,15 @@ export interface PointLineAdaptationReport {
     pointSize: Record<string, number>
     elevation: Record<string, number>
   }
+  matchSourceCounts: Record<string, number>
   connectionDegreeCounts: Record<string, number>
   inferredTypeCounts: Record<string, number>
+  nearestMatchConflicts: Array<{
+    lineId: string
+    endpoint: 'start' | 'end'
+    candidatePointIds: string[]
+    toleranceMeters: number
+  }>
   examples: Array<{
     pointId: string
     connectedLineIds: string[]
@@ -63,21 +76,26 @@ export interface AdaptPointFacilitiesInput {
   defaults: AdaptationDefaults
   lines: AdaptableLine[]
   points: AdaptablePoint[]
+  nearestMatch?: {
+    toleranceMeters: number
+  }
 }
 
 interface NodeConnection {
   line: AdaptableLine
   endpoint: 'start' | 'end'
   vector: [number, number] | null
+  matchSource: NodeConnectionMatchSource
+  distanceMeters?: number
 }
 
 export function adaptPointFacilities(input: AdaptPointFacilitiesInput): {
   points: AdaptedPoint[]
   report: PointLineAdaptationReport
 } {
-  const connectionsByNode = buildConnectionsByNode(input.lines)
-  const points = input.points.map(point => adaptPoint(point, connectionsByNode.get(point.code ?? '') ?? [], input.defaults))
-  const report = createAdaptationReport(points)
+  const connectionIndex = buildConnectionIndex(input.lines, input.points, input.nearestMatch)
+  const points = input.points.map(point => adaptPoint(point, connectionIndex.connectionsByPointId.get(point.id) ?? [], input.defaults))
+  const report = createAdaptationReport(points, connectionIndex.conflicts)
   return { points, report }
 }
 
@@ -101,40 +119,138 @@ function adaptPoint(
     elevationSource: elevation.source,
     connectionDegree: connections.length,
     connectedLineIds: connections.map(({ line }) => line.id),
+    nodeMatchSource: pointNodeMatchSource(connections),
+    ...nearestDistanceProperties(connections),
   }
 }
 
-function buildConnectionsByNode(lines: AdaptableLine[]): Map<string, NodeConnection[]> {
-  const connections = new Map<string, NodeConnection[]>()
+function buildConnectionIndex(
+  lines: AdaptableLine[],
+  points: AdaptablePoint[],
+  nearestMatch: AdaptPointFacilitiesInput['nearestMatch'],
+): {
+  connectionsByPointId: Map<string, NodeConnection[]>
+  conflicts: PointLineAdaptationReport['nearestMatchConflicts']
+} {
+  const connectionsByPointId = new Map<string, NodeConnection[]>()
+  const pointsByCode = new Map<string, AdaptablePoint[]>()
+  const matchedEndpointKeys = new Set<string>()
+  const conflicts: PointLineAdaptationReport['nearestMatchConflicts'] = []
+
+  for (const point of points) {
+    if (point.code) {
+      const values = pointsByCode.get(point.code) ?? []
+      values.push(point)
+      pointsByCode.set(point.code, values)
+    }
+  }
 
   for (const line of lines) {
-    appendConnection(connections, line.startNodeId, {
+    const startConnection: NodeConnection = {
       line,
       endpoint: 'start',
       vector: endpointVector(line.coordinates, 'start'),
-    })
-    appendConnection(connections, line.endNodeId, {
+      matchSource: 'code',
+    }
+    const endConnection: NodeConnection = {
       line,
       endpoint: 'end',
       vector: endpointVector(line.coordinates, 'end'),
-    })
+      matchSource: 'code',
+    }
+    if (appendCodeConnections(connectionsByPointId, pointsByCode, line.startNodeId, startConnection)) {
+      matchedEndpointKeys.add(endpointKey(line.id, 'start'))
+    }
+    if (appendCodeConnections(connectionsByPointId, pointsByCode, line.endNodeId, endConnection)) {
+      matchedEndpointKeys.add(endpointKey(line.id, 'end'))
+    }
   }
 
-  return connections
+  const toleranceMeters = nearestMatch?.toleranceMeters ?? 0
+  if (toleranceMeters > 0) {
+    for (const line of lines) {
+      appendNearestConnection(connectionsByPointId, conflicts, matchedEndpointKeys, line, 'start', points, toleranceMeters)
+      appendNearestConnection(connectionsByPointId, conflicts, matchedEndpointKeys, line, 'end', points, toleranceMeters)
+    }
+  }
+
+  return { connectionsByPointId, conflicts }
 }
 
-function appendConnection(
-  connections: Map<string, NodeConnection[]>,
+function appendCodeConnections(
+  connectionsByPointId: Map<string, NodeConnection[]>,
+  pointsByCode: Map<string, AdaptablePoint[]>,
   nodeId: string | null,
   connection: NodeConnection,
-): void {
+): boolean {
   if (!nodeId) {
+    return false
+  }
+
+  const points = pointsByCode.get(nodeId) ?? []
+  for (const point of points) {
+    appendPointConnection(connectionsByPointId, point.id, connection)
+  }
+  return points.length > 0
+}
+
+function appendNearestConnection(
+  connectionsByPointId: Map<string, NodeConnection[]>,
+  conflicts: PointLineAdaptationReport['nearestMatchConflicts'],
+  matchedEndpointKeys: Set<string>,
+  line: AdaptableLine,
+  endpoint: 'start' | 'end',
+  points: AdaptablePoint[],
+  toleranceMeters: number,
+): void {
+  if (matchedEndpointKeys.has(endpointKey(line.id, endpoint))) {
     return
   }
 
-  const values = connections.get(nodeId) ?? []
+  const coordinate = endpointCoordinate(line.coordinates, endpoint)
+  if (!coordinate) {
+    return
+  }
+
+  const candidates = points
+    .filter(point => point.coordinates !== undefined)
+    .map(point => ({
+      point,
+      distanceMeters: distance2d(coordinate, point.coordinates!),
+    }))
+    .filter(candidate => candidate.distanceMeters <= toleranceMeters)
+    .sort((left, right) => left.distanceMeters - right.distanceMeters)
+
+  if (candidates.length === 1) {
+    const [candidate] = candidates
+    appendPointConnection(connectionsByPointId, candidate!.point.id, {
+      line,
+      endpoint,
+      vector: endpointVector(line.coordinates, endpoint),
+      matchSource: 'nearest',
+      distanceMeters: candidate!.distanceMeters,
+    })
+    return
+  }
+
+  if (candidates.length > 1) {
+    conflicts.push({
+      lineId: line.id,
+      endpoint,
+      candidatePointIds: candidates.map(candidate => candidate.point.id),
+      toleranceMeters,
+    })
+  }
+}
+
+function appendPointConnection(
+  connectionsByPointId: Map<string, NodeConnection[]>,
+  pointId: string,
+  connection: NodeConnection,
+): void {
+  const values = connectionsByPointId.get(pointId) ?? []
   values.push(connection)
-  connections.set(nodeId, values)
+  connectionsByPointId.set(pointId, values)
 }
 
 function inferPointType(
@@ -200,7 +316,10 @@ function inferPointElevation(
   return { value: defaults.surfaceElevationMeters, source: 'default' }
 }
 
-function createAdaptationReport(points: AdaptedPoint[]): PointLineAdaptationReport {
+function createAdaptationReport(
+  points: AdaptedPoint[],
+  nearestMatchConflicts: PointLineAdaptationReport['nearestMatchConflicts'],
+): PointLineAdaptationReport {
   return {
     totalPoints: points.length,
     matchedPoints: points.filter(point => point.connectionDegree > 0).length,
@@ -209,10 +328,14 @@ function createAdaptationReport(points: AdaptedPoint[]): PointLineAdaptationRepo
       pointSize: countBy(points.map(point => point.sizeSource)),
       elevation: countBy(points.map(point => point.elevationSource)),
     },
+    matchSourceCounts: countBy(points
+      .filter(point => point.nodeMatchSource !== 'none')
+      .map(point => point.nodeMatchSource)),
     connectionDegreeCounts: countBy(points.map(point => String(point.connectionDegree))),
     inferredTypeCounts: countBy(points
       .filter(point => point.pointTypeSource === 'topology-degree')
       .map(point => point.pointType)),
+    nearestMatchConflicts,
     examples: points
       .filter(point => (
         point.pointTypeSource !== 'field'
@@ -230,6 +353,34 @@ function createAdaptationReport(points: AdaptedPoint[]): PointLineAdaptationRepo
         },
       })),
   }
+}
+
+function pointNodeMatchSource(connections: NodeConnection[]): NodeMatchSource {
+  if (connections.length === 0) {
+    return 'none'
+  }
+
+  return connections.some(connection => connection.matchSource === 'code') ? 'node-match-code' : 'node-match-nearest'
+}
+
+function nearestDistanceProperties(connections: NodeConnection[]): { nearestMatchDistanceMeters?: number } {
+  const nearestDistance = averageFinite(connections
+    .filter(connection => connection.matchSource === 'nearest')
+    .map(connection => connection.distanceMeters ?? Number.NaN))
+  return nearestDistance == null ? {} : { nearestMatchDistanceMeters: nearestDistance }
+}
+
+function endpointKey(lineId: string, endpoint: 'start' | 'end'): string {
+  return `${lineId}:${endpoint}`
+}
+
+function endpointCoordinate(coordinates: Array<[number, number]>, endpoint: 'start' | 'end'): [number, number] | null {
+  const coordinate = endpoint === 'start' ? coordinates[0] : coordinates[coordinates.length - 1]
+  return coordinate ?? null
+}
+
+function distance2d(left: [number, number], right: [number, number]): number {
+  return Math.hypot(left[0] - right[0], left[1] - right[1])
 }
 
 function endpointVector(

@@ -26,6 +26,7 @@ export interface BuildTemplateDefaults {
   depthM: number
   pointSizeM: number
   surfaceElevationM: number
+  nearestPointMatchToleranceM: number
 }
 
 export interface BuildTemplateFlowRule {
@@ -135,6 +136,7 @@ export function createReferenceBuildTemplate(): BuildTemplate {
       depthM: 2,
       pointSizeM: 1,
       surfaceElevationM: 0,
+      nearestPointMatchToleranceM: 2,
     },
     flowRule: {
       field: 'lx',
@@ -243,6 +245,7 @@ function validateDefaults(input: unknown, errors: BuildTemplateValidationError[]
   requirePositiveNumber(input, 'depthM', errors, 'defaults.depthM')
   requirePositiveNumber(input, 'pointSizeM', errors, 'defaults.pointSizeM')
   requireNumber(input, 'surfaceElevationM', errors, 'defaults.surfaceElevationM')
+  requireNonNegativeNumber(input, 'nearestPointMatchToleranceM', errors, 'defaults.nearestPointMatchToleranceM')
 }
 
 function validateFlowRule(input: unknown, errors: BuildTemplateValidationError[]): void {
@@ -334,6 +337,18 @@ function requirePositiveNumber(
   const value = readPath(input, path)
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     errors.push({ path: errorPath, reason: 'must be a number greater than 0' })
+  }
+}
+
+function requireNonNegativeNumber(
+  input: Record<string, unknown>,
+  path: string,
+  errors: BuildTemplateValidationError[],
+  errorPath = path,
+): void {
+  const value = readPath(input, path)
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    errors.push({ path: errorPath, reason: 'must be a number greater than or equal to 0' })
   }
 }
 

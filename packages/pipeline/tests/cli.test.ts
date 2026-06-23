@@ -592,6 +592,7 @@ describe('buildPostgisOverview', () => {
       elevationSource: 'line-endpoint',
       connectionDegree: 1,
       connectedLineIds: ['line-adapt-1'],
+      nodeMatchSource: 'node-match-code',
       dmbg: 10,
       kj: 0.8,
     }))
@@ -610,6 +611,92 @@ describe('buildPostgisOverview', () => {
         },
       }),
     ])
+  })
+
+  it('uses template nearest-match tolerance for unmatched line endpoints', async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-postgis-nearest-adaptation-'))
+    const template = createReferenceBuildTemplate()
+    template.defaults = {
+      ...template.defaults,
+      nearestPointMatchToleranceM: 2,
+    }
+    const dataSource = {
+      async *readLines(): AsyncIterable<PipeLineRawRow> {
+        yield {
+          guid: 'line-nearest-1',
+          qdbm: 'missing-start',
+          zdbm: 'missing-end',
+          cz: null,
+          dmcc: 700,
+          gg: null,
+          qdms: null,
+          zdms: null,
+          qdndbg: 8,
+          zdndbg: 9,
+          gwlx: '污水管',
+          gs: '市政',
+          msfs: null,
+          lx: '1',
+          gdsx: null,
+          gdcd: null,
+          geomWkbHex: lineStringEwkb([[1000, 1000], [1010, 1000]], 3857),
+        }
+      },
+      async *readPoints(): AsyncIterable<PointFacilityRawRow> {
+        yield {
+          gdbm: 'different-code',
+          hzb: null,
+          zzb: null,
+          lbmc: null,
+          dmbg: null,
+          kj: null,
+          js: null,
+          ms: null,
+          gg: null,
+          jgcz: null,
+          jgxz: null,
+          jgcc: null,
+          tag: null,
+          geomWkbHex: pointEwkb([1000.5, 1000], 3857),
+        }
+      },
+    }
+
+    await buildPostgisOverview({
+      outputRoot,
+      version: 'network-nearest-adaptation',
+      dataSource,
+      expectedSrid: 3857,
+      template,
+    })
+
+    const metadata = JSON.parse(
+      await readFile(join(outputRoot, 'network-nearest-adaptation', 'metadata.json'), 'utf8'),
+    ) as {
+      features: Array<{
+        businessId: string
+        properties: Record<string, unknown>
+      }>
+    }
+    const adaptationReport = JSON.parse(
+      await readFile(join(outputRoot, 'network-nearest-adaptation', 'adaptation-report.json'), 'utf8'),
+    ) as {
+      matchSourceCounts: Record<string, number>
+      nearestMatchConflicts: unknown[]
+    }
+    const adaptedPoint = metadata.features.find(feature => feature.businessId === 'different-code')
+
+    expect(adaptedPoint?.properties).toEqual(expect.objectContaining({
+      connectionDegree: 1,
+      connectedLineIds: ['line-nearest-1'],
+      nodeMatchSource: 'node-match-nearest',
+      dmbg: 8,
+      kj: 0.7,
+    }))
+    expect(adaptationReport.matchSourceCounts).toEqual({
+      'node-match-nearest': 1,
+    })
+    expect(adaptationReport.nearestMatchConflicts).toEqual([])
   })
 })
 

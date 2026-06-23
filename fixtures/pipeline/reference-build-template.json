@@ -52,7 +52,8 @@
     "pipeDiameterMm": 600,
     "depthM": 2,
     "pointSizeM": 1,
-    "surfaceElevationM": 0
+    "surfaceElevationM": 0,
+    "nearestPointMatchToleranceM": 2
   },
   "flowRule": {
     "field": "lx",
