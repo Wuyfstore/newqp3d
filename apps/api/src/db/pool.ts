@@ -3,7 +3,15 @@ import { join } from 'node:path'
 
 import pg from 'pg'
 
-import type { ApiRepository, SearchResult } from '../server.js'
+import type {
+  ApiRepository,
+  DataSourceFieldProfile,
+  DataSourceGeometryField,
+  DataSourceSchema,
+  DataSourceTable,
+  DataSourceTableProfile,
+  SearchResult,
+} from '../server.js'
 
 const { Pool } = pg
 
@@ -29,12 +37,65 @@ interface SearchRow {
   latitude: number | string
 }
 
+interface SchemaRow {
+  schema_name: string
+}
+
+interface TableRow {
+  table_schema: string
+  table_name: string
+  table_type: string
+  estimated_rows: number | string | null
+}
+
+interface ColumnRow {
+  column_name: string
+  data_type: string
+  is_nullable: 'YES' | 'NO'
+}
+
+interface GeometryRow {
+  f_geometry_column: string
+  srid: number | string | null
+  type: string | null
+}
+
+interface CountRow {
+  total_count: number | string
+  null_count: number | string
+  unique_count: number | string
+}
+
+interface SamplesRow {
+  samples: unknown[] | null
+}
+
+interface EstimateRow {
+  estimated_rows: number | string | null
+}
+
 function validateTableName(name: string): string {
   if (!/^[a-zA-Z_]\w*\.[a-zA-Z_]\w*$/.test(name)) {
     throw new Error(`Invalid table name: ${name}`)
   }
 
   return name
+}
+
+function validateIdentifier(name: string): string {
+  if (!/^[a-zA-Z_]\w*$/.test(name)) {
+    throw new Error(`Invalid identifier: ${name}`)
+  }
+
+  return name
+}
+
+function quoteIdentifier(name: string): string {
+  return `"${validateIdentifier(name).replaceAll('"', '""')}"`
+}
+
+function quoteQualifiedName(schema: string, table: string): string {
+  return `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`
 }
 
 export function createPostgisRepository(options: PostgisRepositoryOptions): ApiRepository {
@@ -119,6 +180,52 @@ export function createPostgisRepository(options: PostgisRepositoryOptions): ApiR
 
       return readJson(join(options.outputRoot, latest.version, 'quality-report.json'))
     },
+
+    async listSchemas() {
+      const result = await pool.query<SchemaRow>(`
+        select schema_name
+          from information_schema.schemata
+         where schema_name not in ('information_schema', 'pg_catalog')
+           and schema_name not like 'pg_toast%'
+           and schema_name not like 'pg_temp_%'
+         order by schema_name
+      `)
+
+      return result.rows.map(row => ({ name: row.schema_name }))
+    },
+
+    async listTables(schema) {
+      validateIdentifier(schema)
+      const result = await pool.query<TableRow>(
+        `
+        select t.table_schema,
+               t.table_name,
+               t.table_type,
+               c.reltuples::bigint as estimated_rows
+          from information_schema.tables t
+          left join pg_class c
+            on c.relname = t.table_name
+          left join pg_namespace n
+            on n.oid = c.relnamespace
+           and n.nspname = t.table_schema
+         where t.table_schema = $1
+           and t.table_type in ('BASE TABLE', 'VIEW')
+         order by t.table_name
+        `,
+        [schema],
+      )
+
+      return result.rows.map(row => ({
+        schema: row.table_schema,
+        name: row.table_name,
+        type: row.table_type === 'VIEW' ? 'view' : 'table',
+        estimatedRows: parseNullableInteger(row.estimated_rows),
+      }))
+    },
+
+    async getTableProfile(schema, table) {
+      return getTableProfile(pool, schema, table)
+    },
   }
 }
 
@@ -142,4 +249,219 @@ async function readJson<T = unknown>(path: string): Promise<T | null> {
 
     throw error
   }
+}
+
+async function getTableProfile(pool: pg.Pool, schema: string, table: string): Promise<DataSourceTableProfile> {
+  validateIdentifier(schema)
+  validateIdentifier(table)
+
+  const qualifiedName = quoteQualifiedName(schema, table)
+  const [estimatedRowCount, geometryFields, columns] = await Promise.all([
+    readEstimatedRowCount(pool, schema, table),
+    readGeometryFields(pool, schema, table),
+    readColumns(pool, schema, table),
+  ])
+  const inferredTableKind = inferTableKind(columns, geometryFields)
+  const fields = await Promise.all(
+    columns.map(async column => {
+      const [stats, samples] = await Promise.all([
+        readColumnStats(pool, qualifiedName, column.column_name),
+        readColumnSamples(pool, qualifiedName, column.column_name),
+      ])
+      const recommendedMapping = recommendFieldMapping(column.column_name, inferredTableKind)
+      const field: DataSourceFieldProfile = {
+        name: column.column_name,
+        dataType: column.data_type,
+        isNullable: column.is_nullable === 'YES',
+        samples,
+        nullRate: stats.nullRate,
+        uniqueCount: stats.uniqueCount,
+      }
+
+      if (recommendedMapping !== undefined) {
+        field.recommendedMapping = recommendedMapping
+      }
+
+      return field
+    }),
+  )
+  const recommendedFieldMapping = Object.fromEntries(
+    fields
+      .filter(field => field.recommendedMapping !== undefined)
+      .map(field => [field.recommendedMapping, field.name]),
+  )
+
+  return {
+    schema,
+    table,
+    estimatedRowCount,
+    geometryFields,
+    fields,
+    inferredTableKind,
+    recommendedFieldMapping,
+  }
+}
+
+async function readEstimatedRowCount(pool: pg.Pool, schema: string, table: string): Promise<number | null> {
+  const result = await pool.query<EstimateRow>(
+    `
+    select c.reltuples::bigint as estimated_rows
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1
+       and c.relname = $2
+     limit 1
+    `,
+    [schema, table],
+  )
+
+  return parseNullableInteger(result.rows[0]?.estimated_rows ?? null)
+}
+
+async function readGeometryFields(pool: pg.Pool, schema: string, table: string): Promise<DataSourceGeometryField[]> {
+  const result = await pool.query<GeometryRow>(
+    `
+    select f_geometry_column,
+           srid,
+           type
+      from public.geometry_columns
+     where f_table_schema = $1
+       and f_table_name = $2
+     order by f_geometry_column
+    `,
+    [schema, table],
+  )
+
+  return result.rows.map(row => ({
+    name: row.f_geometry_column,
+    srid: parseNullableInteger(row.srid),
+    geometryType: row.type,
+  }))
+}
+
+async function readColumns(pool: pg.Pool, schema: string, table: string): Promise<ColumnRow[]> {
+  const result = await pool.query<ColumnRow>(
+    `
+    select column_name,
+           data_type,
+           is_nullable
+      from information_schema.columns
+     where table_schema = $1
+       and table_name = $2
+     order by ordinal_position
+    `,
+    [schema, table],
+  )
+
+  return result.rows
+}
+
+async function readColumnStats(
+  pool: pg.Pool,
+  qualifiedName: string,
+  columnName: string,
+): Promise<{ nullRate: number | null; uniqueCount: number | null }> {
+  const column = quoteIdentifier(columnName)
+  const result = await pool.query<CountRow>(`
+    select count(*)::bigint as total_count,
+           count(*) filter (where ${column} is null)::bigint as null_count,
+           count(distinct ${column})::bigint as unique_count
+      from (
+        select ${column}
+          from ${qualifiedName}
+         tablesample system (1)
+         limit 1000
+      ) sample_rows
+  `)
+  const row = result.rows[0]
+  if (row == null) {
+    return { nullRate: null, uniqueCount: null }
+  }
+
+  const totalCount = parseNullableInteger(row.total_count)
+  const nullCount = parseNullableInteger(row.null_count)
+  return {
+    nullRate: totalCount == null || totalCount === 0 || nullCount == null ? null : nullCount / totalCount,
+    uniqueCount: parseNullableInteger(row.unique_count),
+  }
+}
+
+async function readColumnSamples(pool: pg.Pool, qualifiedName: string, columnName: string): Promise<unknown[]> {
+  const column = quoteIdentifier(columnName)
+  const result = await pool.query<SamplesRow>(`
+    select array_agg(${column}) as samples
+      from (
+        select ${column}
+          from ${qualifiedName}
+         where ${column} is not null
+         limit 5
+      ) sample_values
+  `)
+
+  return result.rows[0]?.samples ?? []
+}
+
+function inferTableKind(columns: ColumnRow[], geometryFields: DataSourceGeometryField[]): 'line' | 'point' | 'unknown' {
+  const columnNames = new Set(columns.map(column => column.column_name.toLowerCase()))
+  const geometryTypes = geometryFields.map(field => field.geometryType?.toUpperCase() ?? '')
+
+  if (columnNames.has('qdbm') && columnNames.has('zdbm')) {
+    return 'line'
+  }
+
+  if (columnNames.has('gdbm') || geometryTypes.some(type => type.includes('POINT'))) {
+    return 'point'
+  }
+
+  if (geometryTypes.some(type => type.includes('LINE'))) {
+    return 'line'
+  }
+
+  return 'unknown'
+}
+
+function recommendFieldMapping(fieldName: string, tableKind: 'line' | 'point' | 'unknown'): string | undefined {
+  const normalized = fieldName.toLowerCase()
+  const commonRecommendations: Record<string, string> = {
+    gg: 'spec',
+  }
+  const lineRecommendations: Record<string, string> = {
+    guid: 'id',
+    qdbm: 'startNodeId',
+    zdbm: 'endNodeId',
+    gwlx: 'pipeType',
+    gs: 'owner',
+    cz: 'material',
+    qdndbg: 'startInvertElevation',
+    zdndbg: 'endInvertElevation',
+    qdms: 'startDepth',
+    zdms: 'endDepth',
+    lx: 'flowDirection',
+    gdcd: 'length',
+  }
+  const pointRecommendations: Record<string, string> = {
+    gdbm: 'id',
+    lbmc: 'pointType',
+    dmbg: 'surfaceElevation',
+    jgcc: 'size',
+    jgxz: 'shape',
+    js: 'depth',
+    jgcz: 'material',
+    kj: 'diameter',
+  }
+
+  return tableKind === 'line'
+    ? lineRecommendations[normalized] ?? commonRecommendations[normalized]
+    : tableKind === 'point'
+      ? pointRecommendations[normalized] ?? commonRecommendations[normalized]
+      : commonRecommendations[normalized]
+}
+
+function parseNullableInteger(value: number | string | null | undefined): number | null {
+  if (value == null) {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : null
 }
