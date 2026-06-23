@@ -249,16 +249,14 @@ async function loadVersionManifest(
   apiClient: ApiClient,
   state: LayerState,
   status: HTMLElement,
-  propertyPanel: HTMLElement,
+  _propertyPanel: HTMLElement,
   manifest: VersionManifest,
 ): Promise<LayerHandles> {
   const handles = await loadPipeNetworkLayers(viewer, manifest)
   status.textContent = `tileset: ${manifest.version}`
-  void loadBuildReports(apiClient, manifest.version)
-    .then(reports => showPanel(propertyPanel, renderBuildReportsPanel(reports)))
-    .catch(() => {
-      // The tileset is still usable when the optional summary is unavailable.
-    })
+  void loadBuildReports(apiClient, manifest.version).catch(() => {
+    // The tileset is still usable when the optional summary is unavailable.
+  })
 
   return handles
 }

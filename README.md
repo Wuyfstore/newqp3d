@@ -64,7 +64,7 @@ cd D:\Workspace\Personal\new-qp3d\.worktrees\cesium-pipe-network-clean
 
 ### 1. 构建示例瓦片
 
-示例数据不需要连接数据库，适合先验证项目是否能跑通。
+示例数据不需要连接数据库，适合先验证项目是否能构建。示例烟测输出会写入 `data/smoke-tiles/`，不会覆盖当前 Web 默认读取的 `data/tiles/latest.json`。
 
 ```bash
 pnpm smoke:sample
@@ -73,10 +73,12 @@ pnpm smoke:sample
 该命令会：
 
 1. 编译 pipeline。
-2. 使用 `fixtures/pipeline/` 里的示例点线数据生成 `data/tiles/<version>/`。
-3. 写入 `data/tiles/latest.json`。
+2. 使用 `fixtures/pipeline/` 里的示例点线数据生成 `data/smoke-tiles/<version>/`。
+3. 写入 `data/smoke-tiles/latest.json`。
 4. 构建 API。
 5. 构建 Web 前端。
+
+如果需要让前端显示真实溧阳管网，请先执行 PostGIS 构建，把稳定版本发布到 `QP3D_OUTPUT_ROOT`，默认是 `data/tiles`。
 
 ### 2. 一键启动本地 API 和 Web
 
@@ -182,7 +184,7 @@ pnpm e2e             # 运行 Playwright 验收测试
 pnpm build:pipeline  # 编译 pipeline
 pnpm build:api       # 编译 API
 pnpm build:web       # 构建 Web 前端
-pnpm smoke:sample    # 构建示例瓦片并构建 Web
+pnpm smoke:sample    # 构建隔离示例瓦片到 data/smoke-tiles，并构建 Web
 ```
 
 ## 部署说明

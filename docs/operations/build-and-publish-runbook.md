@@ -27,9 +27,11 @@ node packages/pipeline/dist/cli.js build --source postgis --output data/tiles
 For local smoke verification, build from bundled fixtures:
 
 ```bash
-node packages/pipeline/dist/cli.js build --source sample --output data/tiles
-node packages/pipeline/dist/cli.js validate --version network-YYYYMMDD-HHmm --output data/tiles
+node packages/pipeline/dist/cli.js build --source sample --output data/smoke-tiles
+node packages/pipeline/dist/cli.js validate --version network-YYYYMMDD-HHmm --output data/smoke-tiles
 ```
+
+Keep sample smoke output separate from `data/tiles` so local verification cannot replace the active Web `latest.json`.
 
 ## Validation Rules
 

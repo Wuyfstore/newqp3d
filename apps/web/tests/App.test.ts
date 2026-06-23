@@ -75,6 +75,24 @@ describe('mountPipeNetworkApp', () => {
     document.body.replaceChildren()
   })
 
+  it('keeps the initial property panel hidden after loading latest reports', async () => {
+    const { mountPipeNetworkApp } = await import('../src/App')
+    const root = document.createElement('div')
+    document.body.append(root)
+
+    mountPipeNetworkApp(root)
+
+    await vi.waitFor(() => expect(loadPipeNetworkLayers).toHaveBeenCalledWith(viewer, expect.objectContaining({
+      version: 'network-latest',
+    })))
+    await vi.waitFor(() => expect(apiClient.getQualityReport).toHaveBeenCalledWith('network-latest'))
+
+    const panel = root.querySelector<HTMLElement>('.qp3d-property-panel')
+    expect(panel?.hidden).toBe(true)
+    expect(panel?.getAttribute('aria-hidden')).toBe('true')
+    expect(root.textContent).not.toContain('构建报告')
+  })
+
   it('previews a completed build task version without publishing latest', async () => {
     const { mountPipeNetworkApp } = await import('../src/App')
     const root = document.createElement('div')

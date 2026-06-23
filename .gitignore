@@ -2,6 +2,7 @@
 node_modules/
 dist/
 data/tiles/
+data/smoke-tiles/
 config/backend.env
 config/*.local.env
 playwright-report/

@@ -13,4 +13,15 @@ describe('root package scripts', () => {
       'pnpm --recursive --parallel --filter @new-qp3d/api --filter @new-qp3d/web run dev',
     )
   })
+
+  it('keeps sample smoke output isolated from the active local tile root', async () => {
+    const script = await readFile(
+      resolve(import.meta.dirname, '../../../scripts/smoke-build-sample.mjs'),
+      'utf8',
+    )
+
+    expect(script).not.toContain("'--output', 'data/tiles'")
+    expect(script).not.toContain('"--output", "data/tiles"')
+    expect(script).toContain('data/smoke-tiles')
+  })
 })
