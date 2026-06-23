@@ -70,25 +70,23 @@ pnpm smoke:sample
 4. 构建 API。
 5. 构建 Web 前端。
 
-### 2. 启动本地 API
+### 2. 一键启动本地 API 和 Web
 
-API 启动时需要数据库连接串。即使前端只加载示例瓦片，搜索和详情接口仍依赖 API 配置。
+API、pipeline 和 Vite 开发服务器都会自动读取 `config/backend.env`。即使前端只加载示例瓦片，搜索和详情接口仍依赖 API 配置。
 
-PowerShell 示例：
+首次启动前确认 `config/backend.env` 中的数据库连接、表名、瓦片目录和端口配置正确；`config/backend.example.env` 仅作为字段模板参考。确认后执行：
 
 ```powershell
-$env:QP3D_DATABASE_URL="postgres://<user>:<password>@localhost:15432/qcwebserver"
-$env:QP3D_OUTPUT_ROOT="data/tiles"
-$env:PORT="4100"
-pnpm build:api
-node apps/api/dist/index.js
+notepad config/backend.env
+pnpm dev
 ```
 
-API 默认监听：
+该命令会同时启动：
 
-```text
-http://127.0.0.1:4100
-```
+- API：默认 `http://127.0.0.1:4100`
+- Web：默认 `http://127.0.0.1:5173`
+
+开发模式下 Vite 会读取 `config/backend.env`，自动把 `/api` 代理到 `PORT` 对应的 API 服务，并把 `/tiles` 指向 `QP3D_OUTPUT_ROOT`。
 
 主要接口：
 
@@ -98,29 +96,32 @@ http://127.0.0.1:4100
 - `GET /api/lines/:guid`
 - `GET /api/points/:gdbm`
 
-### 3. 启动 Web 前端
+如需单独启动某一端：
 
-开发模式：
-
-```bash
-pnpm --filter @new-qp3d/web dev
+```powershell
+pnpm dev:api
+pnpm dev:web
 ```
-
-Web 前端默认通过 `/api` 访问后端。开发部署时建议由反向代理把 `/api` 转发到 API 服务，把 `/tiles` 转发到瓦片静态目录。
 
 ## 使用真实 PostGIS 数据构建瓦片
 
-### 1. 配置环境变量
+### 1. 配置后端配置文件
 
-PowerShell 示例：
+后端、pipeline 和 Vite 开发服务器都会默认读取 `config/backend.env`。本地开发时直接编辑这个文件即可；`config/backend.example.env` 只用于查看完整字段模板。
 
-```powershell
-$env:QP3D_DATABASE_URL="postgres://<user>:<password>@localhost:15432/qcwebserver"
-$env:QP3D_LINE_TABLE="public.sys_016_tancexbtjinfo_sde"
-$env:QP3D_POINT_TABLE="public.sys_016_tancedbtjinfo_sde"
-$env:QP3D_EXPECTED_SRID="3857"
-$env:QP3D_OUTPUT_ROOT="data/tiles"
+`config/backend.env` 内容示例：
+
+```text
+QP3D_DATABASE_URL=postgres://<user>:<password>@localhost:15432/qcwebserver
+QP3D_LINE_TABLE=public.sys_016_tancexbtjinfo_sde
+QP3D_POINT_TABLE=public.sys_016_tancedbtjinfo_sde
+QP3D_EXPECTED_SRID=3857
+QP3D_OUTPUT_ROOT=data/tiles
+HOST=0.0.0.0
+PORT=4100
 ```
+
+`config/backend.env` 已被 `.gitignore` 忽略，不要提交真实账号密码。部署到服务器时，也可以在服务环境中设置 `QP3D_CONFIG_FILE` 指向仓库外的绝对路径，例如 `/etc/new-qp3d/backend.env`。
 
 ### 2. 检查数据库
 
@@ -212,7 +213,7 @@ pnpm build:web
 
 ### 2. 生成或更新瓦片
 
-在构建机或服务器上配置数据库环境变量后执行：
+在构建机或服务器上准备好 `config/backend.env` 后执行：
 
 ```bash
 node packages/pipeline/dist/cli.js build --source postgis --output data/tiles
@@ -222,16 +223,19 @@ node packages/pipeline/dist/cli.js build --source postgis --output data/tiles
 
 ### 3. 部署 API
 
-API 运行所需环境变量：
+后端配置文件支持的参数：
 
 ```text
 QP3D_DATABASE_URL     PostgreSQL/PostGIS 连接串，必填
 QP3D_LINE_TABLE       管线表，默认 public.sys_016_tancexbtjinfo_sde
 QP3D_POINT_TABLE      点设施表，默认 public.sys_016_tancedbtjinfo_sde
+QP3D_EXPECTED_SRID    期望 SRID，默认 3857，用于 pipeline 质量校验
 QP3D_OUTPUT_ROOT      瓦片输出目录，默认 data/tiles
 HOST                  API 监听地址，默认 0.0.0.0
 PORT                  API 监听端口，默认 4100
 ```
+
+默认配置文件路径是 `config/backend.env`。如需把敏感配置放在仓库外，在服务环境中只设置 `QP3D_CONFIG_FILE=/etc/new-qp3d/backend.env`，文件内容仍使用上面的键名。
 
 启动：
 
@@ -282,9 +286,9 @@ server {
 ## 数据与安全约定
 
 - 浏览器不直接连接数据库。
-- 数据库连接串只允许放在服务端环境变量或部署密钥中。
+- 数据库连接串只允许放在服务端配置文件、服务端环境变量或部署密钥中。
 - 不要把真实账号、密码、生产连接串写入文档、前端代码或静态瓦片。
-- `data/tiles/`、`dist/`、`node_modules/`、`test-results/` 等生成目录不提交到 Git。
+- `config/backend.env`、`data/tiles/`、`dist/`、`node_modules/`、`test-results/` 等本地配置或生成目录不提交到 Git。
 - 瓦片内只保留前端展示和拾取需要的基础属性；完整详情通过 API 查询。
 
 ## 验证与排障
@@ -300,7 +304,7 @@ pnpm e2e
 
 常见问题：
 
-- `QP3D_DATABASE_URL is required`：启动 API 或 PostGIS 构建前没有配置数据库连接串。
+- `QP3D_DATABASE_URL is required`：启动 API 或 PostGIS 构建前没有在 `config/backend.env` 或 `QP3D_CONFIG_FILE` 指向的文件中配置数据库连接串。
 - 前端显示 `tileset: unavailable`：检查 `/api/versions/latest` 是否可访问，以及 `latest.json` 中的 `tilesetUrl` 是否能返回 `tileset.json`。
 - 搜索无结果：确认 API 能访问数据库，并检查 `guid`、`qdbm`、`zdbm`、`gdbm` 字段是否有值。
 - SRID 异常：查看 `quality-report.json` 中的 `sridValidation` 和 `flagCounts.srid-mismatch`。

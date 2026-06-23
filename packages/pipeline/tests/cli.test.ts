@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -76,15 +76,15 @@ describe('buildPostgisOverview', () => {
           gg: 'DN300',
           qdms: null,
           zdms: null,
-          qdndbg: null,
-          zdndbg: null,
+          qdndbg: Number.NaN,
+          zdndbg: Number.NaN,
           gwlx: '雨水管',
           gs: '市政',
           msfs: null,
-          lx: null,
+          lx: '1',
           gdsx: null,
           gdcd: null,
-          geomWkbHex: lineStringEwkb([[0, 0], [10, 0]], 4326),
+          geomWkbHex: lineStringEwkb([[119.38, 31.57], [119.381, 31.57]], 4326),
         }
       },
       async *readPoints(limit?: number): AsyncIterable<PointFacilityRawRow> {
@@ -94,7 +94,7 @@ describe('buildPostgisOverview', () => {
           hzb: null,
           zzb: null,
           lbmc: '检查井',
-          dmbg: null,
+          dmbg: Number.NaN,
           kj: null,
           js: null,
           ms: null,
@@ -103,7 +103,7 @@ describe('buildPostgisOverview', () => {
           jgxz: null,
           jgcc: null,
           tag: null,
-          geomWkbHex: pointEwkb([5, 5]),
+          geomWkbHex: pointEwkb([119.3805, 31.5705], 4326),
         }
       },
     }
@@ -112,6 +112,10 @@ describe('buildPostgisOverview', () => {
       outputRoot,
       version: 'network-test-postgis',
       dataSource,
+      tileOptions: {
+        maxFeaturesPerTile: 1,
+        maxDepth: 2,
+      },
     })
 
     expect(published.version).toBe('network-test-postgis')
@@ -139,9 +143,73 @@ describe('buildPostgisOverview', () => {
       { kind: 'line', limit: undefined },
       { kind: 'point', limit: undefined },
     ])
-    expect(await readFile(join(outputRoot, 'latest.json'), 'utf8')).toContain('network-test-postgis')
-    expect(await readFile(join(outputRoot, 'network-test-postgis', 'tileset.json'), 'utf8')).toContain('root.glb')
+    const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as {
+      version: string
+      flowMode?: string
+      flowTilesetUrl?: string
+    }
+    expect(latest.version).toBe('network-test-postgis')
+    expect(latest.flowMode).toBe('embedded')
+    expect(latest.flowTilesetUrl).toBeUndefined()
+    const tileset = JSON.parse(
+      await readFile(join(outputRoot, 'network-test-postgis', 'tileset.json'), 'utf8'),
+    ) as {
+      root: {
+        transform?: number[]
+        boundingVolume: { box: number[] }
+        content?: { uri: string }
+        extras?: { featureMetadata?: unknown[] }
+        children: Array<{
+          content?: { uri: string }
+          extras?: { metadataUri?: string }
+        }>
+      }
+    }
+    expect(tileset.root.transform).toHaveLength(16)
+    expect([...tileset.root.transform ?? [], ...tileset.root.boundingVolume.box].every(Number.isFinite)).toBe(true)
+    expect(Math.hypot(tileset.root.transform?.[12] ?? 0, tileset.root.transform?.[13] ?? 0, tileset.root.transform?.[14] ?? 0))
+      .toBeGreaterThan(6_000_000)
+    expect(Math.abs(tileset.root.boundingVolume.box[0])).toBeLessThan(1_000)
+    expect(Math.abs(tileset.root.boundingVolume.box[1])).toBeLessThan(1_000)
     expect((await readFile(join(outputRoot, 'network-test-postgis', 'root.glb'))).byteLength).toBeGreaterThan(20)
+    const tileNames = await readdir(join(outputRoot, 'network-test-postgis', 'tiles'))
+    expect(tileNames.filter(name => name.endsWith('.glb')).length).toBeGreaterThanOrEqual(2)
+    expect(tileNames.filter(name => name.endsWith('.metadata.json')).length).toBeGreaterThanOrEqual(2)
+    expect(tileset.root.content).toBeUndefined()
+    expect(tileset.root.children).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content: expect.objectContaining({ uri: expect.stringMatching(/^tiles\/root-/) }),
+        extras: expect.objectContaining({ metadataUri: expect.stringMatching(/^tiles\/root-/) }),
+      }),
+    ]))
+    expect(tileset.root.extras?.featureMetadata).toBeUndefined()
+    const childTileUris = tileset.root.children
+      .map(child => child.content?.uri)
+      .filter((uri): uri is string => uri !== undefined)
+    expect(childTileUris.length).toBeGreaterThanOrEqual(2)
+    const childMeshes = await Promise.all(
+      childTileUris.map(async uri => readGlbMesh(await readFile(join(outputRoot, 'network-test-postgis', uri)))),
+    )
+    for (const childMesh of childMeshes) {
+      expect(childMesh.normals.length).toBe(childMesh.positions.length)
+      expect(childMesh.texcoords?.length).toBe((childMesh.positions.length / 3) * 2)
+      expect(childMesh.colors?.length).toBe((childMesh.positions.length / 3) * 4)
+    }
+    const metadataUris = tileset.root.children
+      .map(child => child.extras?.metadataUri)
+      .filter((uri): uri is string => uri !== undefined)
+    expect(metadataUris.length).toBeGreaterThanOrEqual(2)
+    const tiledMetadataFeatures = (await Promise.all(
+      metadataUris.map(async uri => (
+        JSON.parse(await readFile(join(outputRoot, 'network-test-postgis', uri), 'utf8')) as {
+          features: Array<{ businessId: string, featureId: number }>
+        }
+      ).features),
+    )).flat()
+    expect(tiledMetadataFeatures.map(feature => feature.businessId).sort()).toEqual(['line-1', 'point-1'])
+    const lineMesh = childMeshes.find(mesh => totalTriangleArea(mesh) > 0 && featureVertexCount(mesh, 0) > 0)
+    if (!lineMesh)
+      throw new Error('Expected at least one non-empty child tile mesh')
     const metadata = JSON.parse(
       await readFile(join(outputRoot, 'network-test-postgis', 'metadata.json'), 'utf8'),
     ) as {
@@ -159,6 +227,8 @@ describe('buildPostgisOverview', () => {
           zdbm: 'B',
           pipeType: '雨水管',
           owner: '市政',
+          lx: '1',
+          flowDirection: 'qdbm-to-zdbm',
           qualityStatus: 'abnormal',
           heightQuality: 'defaulted',
         }),
@@ -168,7 +238,7 @@ describe('buildPostgisOverview', () => {
         properties: expect.objectContaining({
           gdbm: 'point-1',
           pointType: '检查井',
-          qualityStatus: 'normal',
+          qualityStatus: 'abnormal',
         }),
       }),
     ])
@@ -177,7 +247,7 @@ describe('buildPostgisOverview', () => {
     expect(qualityReport.generatedLineFeatures).toBe(1)
     expect(qualityReport.generatedPointFeatures).toBe(1)
     expect(qualityReport.flagCounts['postgis-placeholder-geometry']).toBeUndefined()
-    expect(qualityReport.flagCounts['srid-mismatch']).toBe(1)
+    expect(qualityReport.flagCounts['srid-mismatch']).toBe(2)
     expect(qualityReport.flagCounts['height-defaulted']).toBe(1)
     expect(qualityReport.sridValidation).toEqual({
       expectedSrid: 3857,
@@ -189,7 +259,61 @@ describe('buildPostgisOverview', () => {
       pointMismatchCount: 0,
     })
     expect(qualityReport.rowLimit).toBeUndefined()
-    expect(totalTriangleArea(readGlbMesh(await readFile(join(outputRoot, 'network-test-postgis', 'root.glb'))))).toBeGreaterThan(0)
+    expect(totalTriangleArea(lineMesh)).toBeGreaterThan(0)
+  })
+
+  it('splits child tiles by estimated mesh payload even when feature count is low', async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), 'qp3d-postgis-byte-split-'))
+    const dataSource = {
+      async *readLines(): AsyncIterable<PipeLineRawRow> {
+        for (let index = 0; index < 4; index += 1) {
+          yield {
+            guid: `line-${index + 1}`,
+            qdbm: `A-${index}`,
+            zdbm: `B-${index}`,
+            cz: 'HDPE',
+            dmcc: null,
+            gg: 'DN300',
+            qdms: null,
+            zdms: null,
+            qdndbg: Number.NaN,
+            zdndbg: Number.NaN,
+            gwlx: '雨水管',
+            gs: '市政',
+            msfs: null,
+            lx: '1',
+            gdsx: null,
+            gdcd: null,
+            geomWkbHex: lineStringEwkb([
+              [119.38 + index * 0.001, 31.57],
+              [119.3804 + index * 0.001, 31.5704],
+            ], 4326),
+          }
+        }
+      },
+      async *readPoints(): AsyncIterable<PointFacilityRawRow> {},
+    }
+
+    await buildPostgisOverview({
+      outputRoot,
+      version: 'network-byte-split',
+      dataSource,
+      tileOptions: {
+        maxFeaturesPerTile: 100,
+        maxDepth: 2,
+        maxTileBytes: 1,
+      },
+    })
+
+    const tileset = JSON.parse(
+      await readFile(join(outputRoot, 'network-byte-split', 'tileset.json'), 'utf8'),
+    ) as {
+      root: {
+        children: Array<{ content?: { uri: string } }>
+      }
+    }
+
+    expect(tileset.root.children.length).toBeGreaterThan(1)
   })
 })
 
@@ -211,6 +335,10 @@ function vertex(mesh: Mesh, index: number): [number, number, number] {
     mesh.positions[position + 1] ?? 0,
     mesh.positions[position + 2] ?? 0,
   ]
+}
+
+function featureVertexCount(mesh: Mesh, featureId: number): number {
+  return mesh.featureIds.filter(id => id === featureId).length
 }
 
 function triangleArea(a: [number, number, number], b: [number, number, number], c: [number, number, number]): number {
@@ -243,14 +371,14 @@ function lineStringEwkb(coordinates: Array<[number, number]>, srid = 3857): stri
   return buffer.toString('hex')
 }
 
-function pointEwkb(coordinate: [number, number]): string {
+function pointEwkb(coordinate: [number, number], srid = 3857): string {
   const buffer = Buffer.alloc(1 + 4 + 4 + 16)
   let offset = 0
   buffer.writeUInt8(1, offset)
   offset += 1
   buffer.writeUInt32LE(0x20000001, offset)
   offset += 4
-  buffer.writeUInt32LE(3857, offset)
+  buffer.writeUInt32LE(srid, offset)
   offset += 4
   buffer.writeDoubleLE(coordinate[0], offset)
   buffer.writeDoubleLE(coordinate[1], offset + 8)
@@ -262,25 +390,78 @@ function readGlbMesh(glb: Buffer): Mesh {
   const jsonLength = view.getUint32(12, true)
   const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + jsonLength)).trimEnd()) as {
     bufferViews: Array<{ byteOffset?: number, byteLength: number }>
-    accessors: Array<{ count: number }>
+    accessors: Array<{ bufferView: number, count: number }>
+    meshes: Array<{ primitives: Array<{ attributes: { POSITION: number, NORMAL?: number, TEXCOORD_0?: number, COLOR_0?: number, _FEATURE_ID_0: number }, indices: number }> }>
   }
   const binOffset = 20 + jsonLength + 8
-  const positionView = json.bufferViews[0]
-  const indexView = json.bufferViews[2]
-  if (!positionView || !indexView)
+  const primitive = json.meshes[0]?.primitives[0]
+  if (!primitive)
+    throw new Error('Missing GLB primitive')
+
+  const positionAccessorIndex = primitive.attributes.POSITION
+  const normalAccessorIndex = primitive.attributes.NORMAL
+  const featureAccessorIndex = primitive.attributes._FEATURE_ID_0
+  const texcoordAccessorIndex = primitive.attributes.TEXCOORD_0
+  const colorAccessorIndex = primitive.attributes.COLOR_0
+  const indexAccessorIndex = primitive.indices
+  const positionAccessor = json.accessors[positionAccessorIndex]
+  const normalAccessor = normalAccessorIndex === undefined ? undefined : json.accessors[normalAccessorIndex]
+  const featureAccessor = json.accessors[featureAccessorIndex]
+  const indexAccessor = json.accessors[indexAccessorIndex]
+  const positionView = json.bufferViews[positionAccessor?.bufferView ?? 0]
+  const normalView = normalAccessor === undefined ? undefined : json.bufferViews[normalAccessor.bufferView]
+  const featureView = json.bufferViews[featureAccessor?.bufferView ?? 0]
+  const texcoordAccessor = texcoordAccessorIndex === undefined ? undefined : json.accessors[texcoordAccessorIndex]
+  const texcoordView = texcoordAccessor === undefined ? undefined : json.bufferViews[texcoordAccessor.bufferView]
+  const colorAccessor = colorAccessorIndex === undefined ? undefined : json.accessors[colorAccessorIndex]
+  const colorView = colorAccessor === undefined ? undefined : json.bufferViews[colorAccessor.bufferView]
+  const indexView = json.bufferViews[indexAccessor?.bufferView ?? 0]
+  if (!positionAccessor || !featureAccessor || !indexAccessor || !positionView || !featureView || !indexView)
     throw new Error('Missing GLB mesh buffer views')
 
   return {
     positions: new Float32Array(
       glb.buffer,
       glb.byteOffset + binOffset + (positionView.byteOffset ?? 0),
-      (json.accessors[0]?.count ?? 0) * 3,
+      positionAccessor.count * 3,
     ),
+    normals: normalView
+      ? new Float32Array(
+          glb.buffer,
+          glb.byteOffset + binOffset + (normalView.byteOffset ?? 0),
+          (normalAccessor?.count ?? 0) * 3,
+        )
+      : new Float32Array(),
+    texcoords: texcoordView
+      ? new Float32Array(
+          glb.buffer,
+          glb.byteOffset + binOffset + (texcoordView.byteOffset ?? 0),
+          (texcoordAccessor?.count ?? 0) * 2,
+        )
+      : undefined,
+    colors: colorView
+      ? normalizedColorBytesToFloat32(new Uint8Array(
+          glb.buffer,
+          glb.byteOffset + binOffset + (colorView.byteOffset ?? 0),
+          (colorAccessor?.count ?? 0) * 4,
+        ))
+      : undefined,
     indices: new Uint32Array(
       glb.buffer,
       glb.byteOffset + binOffset + (indexView.byteOffset ?? 0),
-      json.accessors[2]?.count ?? 0,
+      indexAccessor.count,
     ),
-    featureIds: new Uint32Array(),
+    featureIds: new Uint32Array(
+      glb.buffer,
+      glb.byteOffset + binOffset + (featureView.byteOffset ?? 0),
+      featureAccessor.count,
+    ),
   }
+}
+
+function normalizedColorBytesToFloat32(colors: Uint8Array): Float32Array {
+  const result = new Float32Array(colors.length)
+  for (let index = 0; index < colors.length; index += 1)
+    result[index] = (colors[index] ?? 0) / 255
+  return result
 }

@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url'
+
 import { readEnv } from './config/env.js'
 import { createPostgisRepository } from './db/pool.js'
 import { createServer } from './server.js'
@@ -13,7 +15,11 @@ export async function startApi(): Promise<void> {
   await app.listen({ host: env.host, port: env.port })
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+export function isDirectRun(moduleUrl: string, entryPath: string | undefined): boolean {
+  return entryPath !== undefined && moduleUrl === pathToFileURL(entryPath).href
+}
+
+if (isDirectRun(import.meta.url, process.argv[1])) {
   startApi().catch((error: unknown) => {
     console.error(error)
     process.exitCode = 1

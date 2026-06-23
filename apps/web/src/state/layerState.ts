@@ -1,4 +1,4 @@
-export const PIPE_TYPES = ['雨水管', '污水管'] as const
+export const PIPE_TYPES = ['雨水管', '污水管', '合流管'] as const
 export const OWNERS = ['市政', '小区', '农村'] as const
 export const QUALITY_STATES = ['normal', 'abnormal'] as const
 
@@ -31,7 +31,7 @@ export interface LayerState {
 
 export function createLayerState(): LayerState {
   let current: LayerStateSnapshot = {
-    pipeTypes: { 雨水管: true, 污水管: true },
+    pipeTypes: { 雨水管: true, 污水管: true, 合流管: true },
     owners: { 市政: true, 小区: true, 农村: true },
     quality: { normal: true, abnormal: true },
     underground: { enabled: false, terrainAlpha: 1, verticalExaggeration: 1 },

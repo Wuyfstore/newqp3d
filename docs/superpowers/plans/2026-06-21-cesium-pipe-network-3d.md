@@ -767,7 +767,7 @@ Create `scripts/inspect-db.mjs`:
 import { loadPipelineConfig } from '../packages/pipeline/dist/config.js'
 import { PostgisDataSource } from '../packages/pipeline/dist/datasource/postgis.js'
 
-const config = loadPipelineConfig(process.env)
+const config = loadPipelineConfig()
 const source = new PostgisDataSource(config)
 const inspection = await source.inspect()
 console.log(JSON.stringify(inspection, null, 2))
@@ -780,10 +780,10 @@ Run:
 ```bash
 pnpm --filter @new-qp3d/pipeline test
 pnpm --filter @new-qp3d/pipeline build
-$env:QP3D_DATABASE_URL="postgres://<user>:<password>@localhost:15432/qcwebserver"; node scripts/inspect-db.mjs
+node scripts/inspect-db.mjs
 ```
 
-Expected: tests pass; inspection reports line/point counts and SRID `3857`.
+Expected: tests pass; after `config/backend.env` contains real server-side credentials, inspection reports line/point counts and SRID `3857`.
 
 - [ ] **Step 7: Commit**
 
@@ -1623,13 +1623,9 @@ Create `docs/operations/build-and-publish-runbook.md` with these exact sections:
 ```markdown
 # Build and Publish Runbook
 
-## Environment Variables
+## Backend Config File
 
-- `QP3D_DATABASE_URL`
-- `QP3D_POINT_TABLE`
-- `QP3D_LINE_TABLE`
-- `QP3D_EXPECTED_SRID`
-- `QP3D_OUTPUT_ROOT`
+Pipeline and API read `config/backend.env` by default. Prepare that file with the real server-side credentials before startup; `config/backend.example.env` is only a field template.
 
 ## Build Commands
 

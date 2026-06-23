@@ -1,4 +1,4 @@
-import type { Mesh } from '../geometry/pipeMesh.js'
+import type { Mesh } from '../geometry/mesh.js'
 import type { FeatureMetadata } from './tilesetWriter.js'
 
 interface FeatureMetadataSidecar {
@@ -36,14 +36,23 @@ const STRING_METADATA_FIELDS = [
   'pipeType',
   'pointType',
   'owner',
+  'lx',
+  'flowDirection',
   'qualityStatus',
 ] as const
 
 export function writeGlb(mesh: Mesh, metadata: FeatureMetadata[]): Uint8Array {
   const positionSpan: BufferSpan = { byteOffset: 0, byteLength: mesh.positions.byteLength }
-  const metadataBundle = metadata.length > 0 ? createStructuralMetadataBundle(mesh, metadata, positionSpan) : null
+  const normals = normalizedNormalsForMesh(mesh)
+  const normalSpan = alignSpan(positionSpan, normals.byteLength)
+  const texcoords = normalizedTexcoordsForMesh(mesh)
+  const texcoordSpan = texcoords ? alignSpan(normalSpan, texcoords.byteLength) : null
+  const colors = normalizedColorsForMesh(mesh)
+  const colorSpan = colors ? alignSpan(texcoordSpan ?? normalSpan, colors.byteLength) : null
+  const featureStartSpan = colorSpan ?? texcoordSpan ?? normalSpan
+  const metadataBundle = metadata.length > 0 ? createStructuralMetadataBundle(mesh, metadata, featureStartSpan) : null
   const featureSource = metadataBundle?.remappedFeatureIds ?? mesh.featureIds
-  const featureSpan = alignSpan(positionSpan, featureSource.byteLength)
+  const featureSpan = alignSpan(featureStartSpan, featureSource.byteLength)
   const indexSpan = alignSpan(featureSpan, mesh.indices.byteLength)
   let currentSpan = indexSpan
   const metadataBuffers = new Array<MetadataBuffer>()
@@ -58,6 +67,11 @@ export function writeGlb(mesh: Mesh, metadata: FeatureMetadata[]): Uint8Array {
   const binChunk = new Uint8Array(binLength)
 
   binChunk.set(asBytes(mesh.positions), positionSpan.byteOffset)
+  binChunk.set(asBytes(normals), normalSpan.byteOffset)
+  if (texcoords && texcoordSpan)
+    binChunk.set(asBytes(texcoords), texcoordSpan.byteOffset)
+  if (colors && colorSpan)
+    binChunk.set(asBytes(colors), colorSpan.byteOffset)
   binChunk.set(asBytes(featureSource), featureSpan.byteOffset)
   binChunk.set(asBytes(mesh.indices), indexSpan.byteOffset)
   for (const buffer of metadataBuffers)
@@ -67,6 +81,9 @@ export function writeGlb(mesh: Mesh, metadata: FeatureMetadata[]): Uint8Array {
     mesh,
     metadata,
     positionSpan,
+    normalSpan,
+    texcoordSpan,
+    colorSpan,
     featureSpan,
     indexSpan,
     metadataBundle,
@@ -103,6 +120,9 @@ function createGltfJson(
   mesh: Mesh,
   metadata: FeatureMetadata[],
   positionSpan: BufferSpan,
+  normalSpan: BufferSpan,
+  texcoordSpan: BufferSpan | null,
+  colorSpan: BufferSpan | null,
   featureSpan: BufferSpan,
   indexSpan: BufferSpan,
   metadataBundle: StructuralMetadataBundle | null,
@@ -111,9 +131,18 @@ function createGltfJson(
 ): Record<string, unknown> {
   const bufferViews: Array<Record<string, number>> = [
     { buffer: 0, byteOffset: positionSpan.byteOffset, byteLength: positionSpan.byteLength, target: 34962 },
-    { buffer: 0, byteOffset: featureSpan.byteOffset, byteLength: featureSpan.byteLength, target: 34962 },
-    { buffer: 0, byteOffset: indexSpan.byteOffset, byteLength: indexSpan.byteLength, target: 34963 },
+    { buffer: 0, byteOffset: normalSpan.byteOffset, byteLength: normalSpan.byteLength, target: 34962 },
   ]
+  const texcoordAccessorIndex = texcoordSpan ? bufferViews.length : undefined
+  if (texcoordSpan)
+    bufferViews.push({ buffer: 0, byteOffset: texcoordSpan.byteOffset, byteLength: texcoordSpan.byteLength, target: 34962 })
+  const colorAccessorIndex = colorSpan ? bufferViews.length : undefined
+  if (colorSpan)
+    bufferViews.push({ buffer: 0, byteOffset: colorSpan.byteOffset, byteLength: colorSpan.byteLength, target: 34962 })
+  const featureAccessorIndex = bufferViews.length
+  bufferViews.push({ buffer: 0, byteOffset: featureSpan.byteOffset, byteLength: featureSpan.byteLength, target: 34962 })
+  const indexAccessorIndex = bufferViews.length
+  bufferViews.push({ buffer: 0, byteOffset: indexSpan.byteOffset, byteLength: indexSpan.byteLength, target: 34963 })
   const metadataBufferViewBase = bufferViews.length
   for (const buffer of metadataBuffers)
     bufferViews.push({ buffer: 0, byteOffset: buffer.span.byteOffset, byteLength: buffer.span.byteLength })
@@ -121,9 +150,13 @@ function createGltfJson(
   const primitive: Record<string, unknown> = {
     attributes: {
       POSITION: 0,
-      _FEATURE_ID_0: 1,
+      NORMAL: 1,
+      ...(texcoordAccessorIndex !== undefined ? { TEXCOORD_0: texcoordAccessorIndex } : {}),
+      ...(colorAccessorIndex !== undefined ? { COLOR_0: colorAccessorIndex } : {}),
+      _FEATURE_ID_0: featureAccessorIndex,
     },
-    indices: 2,
+    indices: indexAccessorIndex,
+    material: 0,
     mode: 4,
     extras: {
       featureMetadata: metadata,
@@ -146,6 +179,16 @@ function createGltfJson(
         ],
       },
     ],
+    materials: [
+      {
+        doubleSided: true,
+        pbrMetallicRoughness: {
+          baseColorFactor: [1, 1, 1, 1],
+          metallicFactor: 0.15,
+          roughnessFactor: 0.38,
+        },
+      },
+    ],
     buffers: [{ byteLength: binLength }],
     bufferViews,
     accessors: [
@@ -161,18 +204,52 @@ function createGltfJson(
       {
         bufferView: 1,
         byteOffset: 0,
+        componentType: 5126,
+        count: mesh.positions.length / 3,
+        type: 'VEC3',
+      },
+    ],
+  }
+
+  if (texcoordSpan) {
+    const accessors = gltf.accessors as Array<Record<string, unknown>>
+    accessors.push({
+      bufferView: texcoordAccessorIndex,
+      byteOffset: 0,
+      componentType: 5126,
+      count: mesh.positions.length / 3,
+      type: 'VEC2',
+    })
+  }
+  if (colorSpan) {
+    const accessors = gltf.accessors as Array<Record<string, unknown>>
+    accessors.push({
+      bufferView: colorAccessorIndex,
+      byteOffset: 0,
+      componentType: 5121,
+      count: mesh.positions.length / 3,
+      normalized: true,
+      type: 'VEC4',
+    })
+  }
+  {
+    const accessors = gltf.accessors as Array<Record<string, unknown>>
+    accessors.push(
+      {
+        bufferView: featureAccessorIndex,
+        byteOffset: 0,
         componentType: 5125,
         count: mesh.featureIds.length,
         type: 'SCALAR',
       },
       {
-        bufferView: 2,
+        bufferView: indexAccessorIndex,
         byteOffset: 0,
         componentType: 5125,
         count: mesh.indices.length,
         type: 'SCALAR',
       },
-    ],
+    )
   }
 
   if (metadataBundle) {
@@ -217,8 +294,41 @@ function align4(value: number): number {
   return (value + 3) & ~3
 }
 
-function asBytes(value: Float32Array | Uint32Array): Uint8Array {
+function asBytes(value: Float32Array | Uint32Array | Uint8Array): Uint8Array {
   return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+}
+
+function normalizedNormalsForMesh(mesh: Mesh): Float32Array {
+  if (mesh.normals.length === mesh.positions.length)
+    return mesh.normals
+
+  const normals = new Float32Array(mesh.positions.length)
+  for (let index = 0; index < normals.length; index += 3) {
+    normals[index] = 0
+    normals[index + 1] = 0
+    normals[index + 2] = 1
+  }
+  return normals
+}
+
+function normalizedTexcoordsForMesh(mesh: Mesh): Float32Array | null {
+  const expectedLength = (mesh.positions.length / 3) * 2
+  if (mesh.texcoords?.length === expectedLength)
+    return mesh.texcoords
+
+  return null
+}
+
+function normalizedColorsForMesh(mesh: Mesh): Uint8Array | null {
+  const expectedLength = (mesh.positions.length / 3) * 4
+  if (mesh.colors?.length === expectedLength) {
+    const colors = new Uint8Array(mesh.colors.length)
+    for (let index = 0; index < mesh.colors.length; index += 1)
+      colors[index] = Math.round(Math.min(Math.max(mesh.colors[index] ?? 0, 0), 1) * 255)
+    return colors
+  }
+
+  return null
 }
 
 function createStructuralMetadataBundle(

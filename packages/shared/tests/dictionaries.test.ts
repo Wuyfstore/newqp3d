@@ -7,10 +7,11 @@ import {
 } from '../src/dictionaries.js'
 
 describe('pipe and point dictionaries', () => {
-  it('maps rainwater and sewage pipes to stable layer ids and colors', () => {
-    expect(PIPE_LAYER_TYPES).toEqual(['雨水管', '污水管'])
+  it('maps rainwater, sewage, and combined pipes to stable layer ids and colors', () => {
+    expect(PIPE_LAYER_TYPES).toEqual(['雨水管', '污水管', '合流管'])
     expect(getPipeColor('雨水管')).toBe('#00A9CE')
     expect(getPipeColor('污水管')).toBe('#A23B72')
+    expect(getPipeColor('合流管')).toBe('#D18B00')
     expect(getPipeColor('未知')).toBe('#8A8F98')
   })
 

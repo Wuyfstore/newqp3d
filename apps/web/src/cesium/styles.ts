@@ -1,4 +1,9 @@
-import { Cesium3DTileStyle } from 'cesium'
+import {
+  Cesium3DTileStyle,
+  CustomShader,
+  CustomShaderMode,
+  UniformType,
+} from 'cesium'
 
 import type { LayerStateSnapshot } from '../state/layerState'
 
@@ -119,29 +124,48 @@ body,
   document.head.append(style)
 }
 
-function listExpression(values: Record<string, boolean>, propertyName: string): string {
-  const visibleValues = Object.entries(values)
-    .filter(([, visible]) => visible)
-    .map(([value]) => `\${${propertyName}} === '${value}'`)
-
-  return visibleValues.length === 0 ? 'false' : `(${visibleValues.join(' || ')})`
-}
-
 export function createPipeNetworkStyle(snapshot: LayerStateSnapshot): Cesium3DTileStyle {
-  const pipeTypeExpression = listExpression(snapshot.pipeTypes, 'pipeType')
-  const ownerExpression = listExpression(snapshot.owners, 'owner')
   const normalExpression = snapshot.quality.normal ? "${qualityStatus} !== 'abnormal'" : 'false'
   const abnormalExpression = snapshot.quality.abnormal ? "${qualityStatus} === 'abnormal'" : 'false'
+  const qualityExpression = `(${normalExpression} || ${abnormalExpression})`
 
   return new Cesium3DTileStyle({
     color: {
       conditions: [
         ["${qualityStatus} === 'abnormal'", "color('#E05A47', 1)"],
-        ["${pipeType} === '雨水管'", "color('#00A9CE', 1)"],
-        ["${pipeType} === '污水管'", "color('#A23B72', 1)"],
-        ['true', "color('#8A8F98', 1)"],
+        ["${featureType} === 'point'", "color('#F7C948', 1)"],
+        ['true', "color('#FFFFFF', 1)"],
       ],
     },
-    show: `${pipeTypeExpression} && ${ownerExpression} && (${normalExpression} || ${abnormalExpression})`,
+    show: qualityExpression,
+  })
+}
+
+export function createFlowMaterialShader(): CustomShader {
+  return new CustomShader({
+    mode: CustomShaderMode.MODIFY_MATERIAL,
+    uniforms: {
+      u_time: {
+        type: UniformType.FLOAT,
+        value: 0,
+      },
+    },
+    fragmentShaderText: `
+void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+  float along = fsInput.attributes.texCoord_0.x;
+  float radial = clamp(fsInput.attributes.texCoord_0.y, 0.0, 1.0);
+  float flowEnabled = step(0.0, fsInput.attributes.texCoord_0.y);
+  float phase = fract(u_time * 0.22 - along + 1.0);
+  float head = 1.0 - smoothstep(0.0, 0.045, phase);
+  float trail = smoothstep(0.28, 0.0, phase);
+  float radialGlow = smoothstep(0.05, 1.0, radial);
+  float endpointFade = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.88, 1.0, along));
+  float glow = clamp(max(head, trail * 0.55) * mix(0.18, 1.0, radialGlow) * endpointFade, 0.0, 1.0) * flowEnabled;
+  vec3 base = fsInput.attributes.color_0.rgb;
+  vec3 highlight = min(base * 1.85 + vec3(0.10), vec3(1.0));
+  material.diffuse = mix(material.diffuse, highlight, glow);
+  material.emissive = highlight * glow * 0.72;
+}
+`,
   })
 }

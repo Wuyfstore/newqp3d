@@ -5,13 +5,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json && node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run tests"
+    "build": "pnpm --filter @new-qp3d/runtime-config build && tsc -p tsconfig.json",
+    "dev": "pnpm --filter @new-qp3d/runtime-config build && tsc -p tsconfig.json && node dist/index.js",
+    "typecheck": "pnpm --filter @new-qp3d/runtime-config build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @new-qp3d/runtime-config build && vitest run tests"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@new-qp3d/runtime-config": "workspace:*",
     "@new-qp3d/shared": "workspace:*",
     "fastify": "^5.8.5",
     "pg": "^8.22.0"

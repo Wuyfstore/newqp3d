@@ -1,3 +1,4 @@
+import './cesium/baseUrl'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 
 import { mountPipeNetworkApp } from './App'

@@ -1,4 +1,4 @@
-export const PIPE_LAYER_TYPES = ['雨水管', '污水管'] as const
+export const PIPE_LAYER_TYPES = ['雨水管', '污水管', '合流管'] as const
 
 export type RenderStrategy = 'generated-low-poly' | 'generated-parametric' | 'model'
 
@@ -11,6 +11,7 @@ export interface PointFacilityRenderRule {
 const PIPE_COLORS = new Map<string, string>([
   ['雨水管', '#00A9CE'],
   ['污水管', '#A23B72'],
+  ['合流管', '#D18B00'],
 ])
 
 export const POINT_FACILITY_RENDER_RULES: PointFacilityRenderRule[] = [

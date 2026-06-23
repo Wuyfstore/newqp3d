@@ -2,6 +2,8 @@
 node_modules/
 dist/
 data/tiles/
+config/backend.env
+config/*.local.env
 playwright-report/
 test-results/
 *.log

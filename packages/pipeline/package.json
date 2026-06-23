@@ -8,11 +8,12 @@
     "pipe-network": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run tests"
+    "build": "pnpm --filter @new-qp3d/runtime-config build && pnpm --filter @new-qp3d/shared build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @new-qp3d/runtime-config build && pnpm --filter @new-qp3d/shared build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @new-qp3d/runtime-config build && vitest run tests"
   },
   "dependencies": {
+    "@new-qp3d/runtime-config": "workspace:*",
     "@new-qp3d/shared": "workspace:*",
     "pg": "^8.22.0",
     "pg-cursor": "^2.21.0"

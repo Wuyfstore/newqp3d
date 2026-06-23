@@ -6,18 +6,21 @@
   "packageManager": "pnpm@10.0.0",
   "pnpm": {
     "overrides": {
+      "@cesium/engine": "9.1.0",
+      "@cesium/widgets": "6.1.0",
       "@zip.js/zip.js": "2.7.53"
     }
   },
   "scripts": {
-    "typecheck": "pnpm --filter @new-qp3d/shared build && pnpm -r typecheck",
-    "test": "vitest run",
-    "test:pipeline": "vitest run packages/pipeline/tests",
-    "test:api": "vitest run apps/api/tests",
+    "dev": "pnpm --recursive --parallel --filter @new-qp3d/api --filter @new-qp3d/web run dev",
+    "typecheck": "pnpm --filter @new-qp3d/runtime-config build && pnpm --filter @new-qp3d/shared build && pnpm -r typecheck",
+    "test": "pnpm --filter @new-qp3d/runtime-config build && vitest run",
+    "test:pipeline": "pnpm --filter @new-qp3d/runtime-config build && vitest run packages/pipeline/tests",
+    "test:api": "pnpm --filter @new-qp3d/runtime-config build && vitest run apps/api/tests",
     "test:web": "vitest run apps/web/tests",
     "e2e": "playwright test",
-    "build:pipeline": "pnpm --filter @new-qp3d/pipeline build",
-    "build:api": "pnpm --filter @new-qp3d/api build",
+    "build:pipeline": "pnpm --filter @new-qp3d/runtime-config build && pnpm --filter @new-qp3d/shared build && pnpm --filter @new-qp3d/pipeline build",
+    "build:api": "pnpm --filter @new-qp3d/runtime-config build && pnpm --filter @new-qp3d/api build",
     "build:web": "pnpm --filter @new-qp3d/web build",
     "smoke:sample": "node scripts/smoke-build-sample.mjs",
     "dev:web": "pnpm --filter @new-qp3d/web dev",

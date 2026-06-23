@@ -1,12 +1,20 @@
 # Build and Publish Runbook
 
-## Environment Variables
+## Backend Config File
 
-- `QP3D_DATABASE_URL`
-- `QP3D_POINT_TABLE`
-- `QP3D_LINE_TABLE`
-- `QP3D_EXPECTED_SRID`
-- `QP3D_OUTPUT_ROOT`
+Pipeline and API read `config/backend.env` by default. Prepare this file on the build host before startup; `config/backend.example.env` is only a field template.
+
+```text
+QP3D_DATABASE_URL=postgres://<user>:<password>@localhost:15432/qcwebserver
+QP3D_POINT_TABLE=public.sys_016_tancedbtjinfo_sde
+QP3D_LINE_TABLE=public.sys_016_tancexbtjinfo_sde
+QP3D_EXPECTED_SRID=3857
+QP3D_OUTPUT_ROOT=data/tiles
+HOST=0.0.0.0
+PORT=4100
+```
+
+For production, keep the real file outside the repository and set `QP3D_CONFIG_FILE` in the service environment to an absolute path such as `/etc/new-qp3d/backend.env`.
 
 ## Build Commands
 

@@ -5,6 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@cesium/engine': 9.1.0
+  '@cesium/widgets': 6.1.0
   '@zip.js/zip.js': 2.7.53
 
 importers:
@@ -29,6 +31,9 @@ importers:
       '@fastify/cors':
         specifier: ^11.2.0
         version: 11.2.0
+      '@new-qp3d/runtime-config':
+        specifier: workspace:*
+        version: link:../../packages/runtime-config
       '@new-qp3d/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -70,6 +75,9 @@ importers:
 
   packages/pipeline:
     dependencies:
+      '@new-qp3d/runtime-config':
+        specifier: workspace:*
+        version: link:../runtime-config
       '@new-qp3d/shared':
         specifier: workspace:*
         version: link:../shared
@@ -90,6 +98,15 @@ importers:
         specifier: ^3.2.0
         version: 3.2.6(@types/node@24.13.2)(lightningcss@1.32.0)
 
+  packages/runtime-config:
+    devDependencies:
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.6(@types/node@24.13.2)(lightningcss@1.32.0)
+
   packages/shared:
     devDependencies:
       typescript:
@@ -101,12 +118,12 @@ importers:
 
 packages:
 
-  '@cesium/engine@9.2.0':
-    resolution: {integrity: sha512-vFVITo7UwIY1H8zK53etljv1w0CVaFSzOcLyItrM88r47zyPL7/RgooVKqZXnM5V8prs33S5TO/JSqJmvpyMTQ==}
+  '@cesium/engine@9.1.0':
+    resolution: {integrity: sha512-sDscnq8Tl2tSJCJRoxlrTSj2TfdsZr8zOXyrj6bLJaqBDuf53vgPS5Y5D+WKbwUomZ/hI2EIlMtLD2Ev4MwnAg==}
     engines: {node: '>=14.0.0'}
 
-  '@cesium/widgets@6.1.2':
-    resolution: {integrity: sha512-RNgogbRqlzjZxxG7icAUIDFZ0rm4OpHJ9b9lS/TGVm44PVVNG0Umhp4Tlf9U6r4ggwayKUkGV5dDIDa+pJGcVQ==}
+  '@cesium/widgets@6.1.0':
+    resolution: {integrity: sha512-wNPEsHFXiDOwosf+6O3+daee83t+lL/1lXxmK2dOKe5tV4h5BBIFAq8A8ttSmdAhDj+WVMS/ZGCvIi5Y87GTpw==}
     engines: {node: '>=14.0.0'}
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -1098,7 +1115,7 @@ packages:
 
 snapshots:
 
-  '@cesium/engine@9.2.0':
+  '@cesium/engine@9.1.0':
     dependencies:
       '@tweenjs/tween.js': 23.1.3
       '@zip.js/zip.js': 2.7.53
@@ -1120,9 +1137,9 @@ snapshots:
       topojson-client: 3.1.0
       urijs: 1.19.11
 
-  '@cesium/widgets@6.1.2':
+  '@cesium/widgets@6.1.0':
     dependencies:
-      '@cesium/engine': 9.2.0
+      '@cesium/engine': 9.1.0
       nosleep.js: 0.12.0
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -1434,8 +1451,8 @@ snapshots:
 
   cesium@1.117.0:
     dependencies:
-      '@cesium/engine': 9.2.0
-      '@cesium/widgets': 6.1.2
+      '@cesium/engine': 9.1.0
+      '@cesium/widgets': 6.1.0
 
   chai@5.3.3:
     dependencies:

@@ -1,3 +1,7 @@
+import { isAbsolute, resolve } from 'node:path'
+
+import { loadRuntimeConfig, QP3D_WORKSPACE_ROOT } from '@new-qp3d/runtime-config'
+
 export interface ApiEnv {
   databaseUrl: string
   lineTable: string
@@ -13,18 +17,29 @@ const DEFAULT_OUTPUT_ROOT = 'data/tiles'
 const DEFAULT_HOST = '0.0.0.0'
 const DEFAULT_PORT = 4100
 
-export function readEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
+export interface ReadEnvOptions {
+  cwd?: string
+  processEnv?: Record<string, string | undefined>
+}
+
+export function readEnv(source: NodeJS.ProcessEnv = process.env, options: ReadEnvOptions = {}): ApiEnv {
+  const config = loadRuntimeConfig({
+    env: options.processEnv ?? process.env,
+    overrides: source,
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+  })
+
   return {
-    databaseUrl: readDatabaseUrl(source),
-    lineTable: source.QP3D_LINE_TABLE ?? DEFAULT_LINE_TABLE,
-    pointTable: source.QP3D_POINT_TABLE ?? DEFAULT_POINT_TABLE,
-    outputRoot: source.QP3D_OUTPUT_ROOT ?? DEFAULT_OUTPUT_ROOT,
-    host: source.HOST ?? DEFAULT_HOST,
-    port: readPort(source.PORT),
+    databaseUrl: readDatabaseUrl(config),
+    lineTable: config.QP3D_LINE_TABLE ?? DEFAULT_LINE_TABLE,
+    pointTable: config.QP3D_POINT_TABLE ?? DEFAULT_POINT_TABLE,
+    outputRoot: resolveOutputRoot(config.QP3D_OUTPUT_ROOT ?? DEFAULT_OUTPUT_ROOT, config[QP3D_WORKSPACE_ROOT]),
+    host: config.HOST ?? DEFAULT_HOST,
+    port: readPort(config.PORT),
   }
 }
 
-function readDatabaseUrl(source: NodeJS.ProcessEnv): string {
+function readDatabaseUrl(source: Record<string, string | undefined>): string {
   const value = source.QP3D_DATABASE_URL?.trim() || source.DATABASE_URL?.trim()
   if (!value) {
     throw new Error('QP3D_DATABASE_URL or DATABASE_URL is required')
@@ -44,4 +59,8 @@ function readPort(value: string | undefined): number {
   }
 
   return port
+}
+
+function resolveOutputRoot(outputRoot: string, workspaceRoot: string | undefined): string {
+  return isAbsolute(outputRoot) ? outputRoot : resolve(workspaceRoot ?? process.cwd(), outputRoot)
 }

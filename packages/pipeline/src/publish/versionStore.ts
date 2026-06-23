@@ -19,6 +19,8 @@ export interface LatestManifest {
   tilesetUrl: string
   metadataUrl: string
   qualityReportUrl: string
+  flowTilesetUrl?: string
+  flowMode?: 'embedded'
 }
 
 const REQUIRED_FILES = ['tileset.json', 'root.glb', 'quality-report.json'] as const
@@ -47,7 +49,7 @@ export async function publishVersion(input: PublishVersionInput): Promise<Publis
     await rename(incomingDirectory, versionDirectory)
     await rm(stagingDirectory, { force: true, recursive: true }).catch(() => undefined)
 
-    const latest = createLatestManifest(input.version)
+    const latest = createLatestManifest(input.version, input.files)
     await writeFile(latestPath, `${JSON.stringify(latest, null, 2)}\n`)
 
     return {
@@ -71,13 +73,19 @@ export async function readLatestManifest(outputRoot: string): Promise<LatestMani
   return JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as LatestManifest
 }
 
-function createLatestManifest(version: string): LatestManifest {
-  return {
+function createLatestManifest(version: string, files: Record<string, string | Uint8Array>): LatestManifest {
+  const latest: LatestManifest = {
     version,
     tilesetUrl: `/tiles/${version}/tileset.json`,
     metadataUrl: `/tiles/${version}/metadata.json`,
     qualityReportUrl: `/tiles/${version}/quality-report.json`,
   }
+  if (files['flow/tileset.json'] && files['flow/root.glb'])
+    latest.flowTilesetUrl = `/tiles/${version}/flow/tileset.json`
+  if (files['.flow-mode'])
+    latest.flowMode = 'embedded'
+
+  return latest
 }
 
 async function validateRequiredFiles(directory: string): Promise<void> {

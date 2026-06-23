@@ -72,6 +72,7 @@ describe('installPicking', () => {
 
     expect(onPick).toHaveBeenCalledOnce()
   })
+
 })
 
 function viewer(pick: () => unknown) {

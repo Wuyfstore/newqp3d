@@ -33,6 +33,26 @@ describe('publishVersion', () => {
       .toContain('"asset"')
   })
 
+  it('adds a flow tileset URL when flow files are published', async () => {
+    const outputRoot = await makeTempDir('qp3d-version-store-')
+
+    await publishVersion({
+      outputRoot,
+      version: 'network-20260621-1500',
+      files: {
+        'tileset.json': JSON.stringify({ asset: { version: '1.1' } }),
+        'root.glb': new Uint8Array([0x67, 0x6C, 0x54, 0x46]),
+        'flow/tileset.json': JSON.stringify({ asset: { version: '1.1' } }),
+        'flow/root.glb': new Uint8Array([0x67, 0x6C, 0x54, 0x46]),
+        'quality-report.json': JSON.stringify({ versionId: 'network-20260621-1500' }),
+      },
+    })
+
+    expect(await readJson(join(outputRoot, 'latest.json'))).toEqual(expect.objectContaining({
+      flowTilesetUrl: '/tiles/network-20260621-1500/flow/tileset.json',
+    }))
+  })
+
   it('does not replace latest when validation fails', async () => {
     const outputRoot = await makeTempDir('qp3d-version-store-')
 
