@@ -30,6 +30,9 @@ function createApi(overrides: Partial<ApiClient> = {}): ApiClient {
     getLatestQuality: async () => ({}),
     getQualityReport: async () => ({}),
     getAdaptationReport: async () => ({}),
+    listVersions: async () => [],
+    publishVersion: async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }),
+    rollbackVersion: async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }),
     listSchemas: async () => [],
     listTables: async () => [],
     getTableProfile: async () => ({
@@ -100,6 +103,39 @@ describe('build task center', () => {
 
     expect(center.element.textContent).toContain('queued')
     expect(center.element.textContent).toContain('0%')
+  })
+
+  it('publishes completed task output and rolls back from version history', async () => {
+    const publishVersion = vi.fn(async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }))
+    const rollbackVersion = vi.fn(async version => ({ version, tilesetUrl: `/tiles/${version}/tileset.json` }))
+    const api = createApi({
+      listBuildTasks: vi.fn(async () => [
+        createTask({ status: 'completed', progress: 100, outputVersion: 'network-new' }),
+      ]),
+      getBuildTask: vi.fn(async id => createTask({
+        id,
+        status: 'completed',
+        progress: 100,
+        outputVersion: 'network-new',
+      })),
+      listVersions: vi.fn(async () => [
+        { version: 'network-new', status: 'ready' as const, tilesetUrl: '/tiles/network-new/tileset.json' },
+        { version: 'network-old', status: 'superseded' as const, tilesetUrl: '/tiles/network-old/tileset.json' },
+      ]),
+      publishVersion,
+      rollbackVersion,
+    })
+    const center = createBuildTaskCenter({ apiClient: api, templateId: 'template-1' })
+    document.body.replaceChildren(center.element)
+
+    await center.load()
+    center.element.querySelector<HTMLButtonElement>('[data-build-task-publish]')!.click()
+    await vi.waitFor(() => expect(publishVersion).toHaveBeenCalledWith('network-new'))
+    await vi.waitFor(() => expect(center.element.textContent).toContain('版本已发布: network-new'))
+
+    center.element.querySelector<HTMLButtonElement>('[data-version-rollback-id="network-old"]')!.click()
+    await vi.waitFor(() => expect(rollbackVersion).toHaveBeenCalledWith('network-old'))
+    await vi.waitFor(() => expect(center.element.textContent).toContain('已回滚到: network-old'))
   })
 
   it('uses the current template id when starting a build task', async () => {

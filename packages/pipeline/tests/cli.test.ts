@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -32,19 +32,19 @@ describe('buildSample', () => {
 
     await buildSample(outputRoot)
 
-    const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as {
+    const record = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as {
       version: string
       metadataUrl: string
     }
     const metadata = JSON.parse(
-      await readFile(join(outputRoot, latest.version, 'metadata.json'), 'utf8'),
+      await readFile(join(outputRoot, record.version, 'metadata.json'), 'utf8'),
     ) as {
       features: Array<{
         properties: Record<string, unknown>
       }>
     }
 
-    expect(latest.metadataUrl).toBe(`/tiles/${latest.version}/metadata.json`)
+    expect(record.metadataUrl).toBe(`/tiles/${record.version}/metadata.json`)
     expect(metadata.features[0]?.properties).toEqual(expect.objectContaining({
       type: 'line',
       featureType: 'line',
@@ -144,16 +144,19 @@ describe('buildPostgisOverview', () => {
       { kind: 'line', limit: undefined },
       { kind: 'point', limit: undefined },
     ])
-    const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as {
+    await expect(pathExists(join(outputRoot, 'latest.json'))).resolves.toBe(false)
+    const versionRecord = JSON.parse(await readFile(join(outputRoot, 'network-test-postgis', 'version-record.json'), 'utf8')) as {
       version: string
+      status: string
       flowMode?: string
       flowTilesetUrl?: string
       adaptationReportUrl?: string
     }
-    expect(latest.version).toBe('network-test-postgis')
-    expect(latest.flowMode).toBe('embedded')
-    expect(latest.flowTilesetUrl).toBeUndefined()
-    expect(latest.adaptationReportUrl).toBe('/tiles/network-test-postgis/adaptation-report.json')
+    expect(versionRecord.version).toBe('network-test-postgis')
+    expect(versionRecord.status).toBe('ready')
+    expect(versionRecord.flowMode).toBe('embedded')
+    expect(versionRecord.flowTilesetUrl).toBeUndefined()
+    expect(versionRecord.adaptationReportUrl).toBe('/tiles/network-test-postgis/adaptation-report.json')
     const tileset = JSON.parse(
       await readFile(join(outputRoot, 'network-test-postgis', 'tileset.json'), 'utf8'),
     ) as {
@@ -766,4 +769,13 @@ function normalizedColorBytesToFloat32(colors: Uint8Array): Float32Array {
   for (let index = 0; index < colors.length; index += 1)
     result[index] = (colors[index] ?? 0) / 255
   return result
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
 }

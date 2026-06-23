@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,6 +19,9 @@ function createRepository(overrides: Partial<ApiRepository> = {}): ApiRepository
     getVersion: async () => null,
     getQualityReport: async () => null,
     getAdaptationReport: async () => null,
+    listVersions: async () => [],
+    publishVersion: async () => null,
+    rollbackVersion: async () => null,
     ...overrides,
   }
 }
@@ -117,6 +120,66 @@ describe('version and quality routes', () => {
     }
   })
 
+  it('lists ready versions and publishes a selected version as latest', async () => {
+    const versions = [
+      { version: 'network-ready', status: 'ready', tilesetUrl: '/tiles/network-ready/tileset.json' },
+      { version: 'network-old', status: 'published', tilesetUrl: '/tiles/network-old/tileset.json' },
+    ]
+    const app = await createServer(createRepository({
+      listVersions: async () => versions,
+      publishVersion: async version => ({
+        version,
+        tilesetUrl: `/tiles/${version}/tileset.json`,
+        metadataUrl: `/tiles/${version}/metadata.json`,
+        qualityReportUrl: `/tiles/${version}/quality-report.json`,
+      }),
+    }))
+
+    try {
+      const listResponse = await app.inject({ method: 'GET', url: '/api/versions' })
+      const publishResponse = await app.inject({
+        method: 'POST',
+        url: '/api/versions/network-ready/publish',
+      })
+
+      expect(listResponse.statusCode).toBe(200)
+      expect(listResponse.json()).toEqual({ versions })
+      expect(publishResponse.statusCode).toBe(200)
+      expect(publishResponse.json()).toMatchObject({
+        version: 'network-ready',
+        tilesetUrl: '/tiles/network-ready/tileset.json',
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rolls back latest to a previous version', async () => {
+    const app = await createServer(createRepository({
+      rollbackVersion: async version => ({
+        version,
+        tilesetUrl: `/tiles/${version}/tileset.json`,
+        metadataUrl: `/tiles/${version}/metadata.json`,
+        qualityReportUrl: `/tiles/${version}/quality-report.json`,
+      }),
+    }))
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/versions/network-old/rollback',
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toMatchObject({
+        version: 'network-old',
+        tilesetUrl: '/tiles/network-old/tileset.json',
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('rejects unsafe version report paths', async () => {
     const app = await createServer(createRepository({
       getQualityReport: async () => ({ versionId: 'should-not-read' }),
@@ -188,10 +251,78 @@ describe('version and quality routes', () => {
     })
     await expect(repository.getQualityReport('../secret')).rejects.toThrow('Invalid version id')
   })
+
+  it('switches latest only when publishing a prepared version from disk', async () => {
+    const outputRoot = await makeTempDir('qp3d-api-publish-')
+    await writePreparedVersion(outputRoot, 'network-old')
+    await writePreparedVersion(outputRoot, 'network-new')
+
+    const repository = createPostgisRepository({
+      databaseUrl: 'postgres://example.invalid/qp3d',
+      lineTable: 'public.lines',
+      pointTable: 'public.points',
+      outputRoot,
+    })
+
+    await expect(repository.getLatestVersion()).resolves.toBeNull()
+    await expect(repository.listVersions()).resolves.toEqual([
+      expect.objectContaining({ version: 'network-new', status: 'ready' }),
+      expect.objectContaining({ version: 'network-old', status: 'ready' }),
+    ])
+
+    await expect(repository.publishVersion('network-old')).resolves.toEqual(expect.objectContaining({
+      version: 'network-old',
+      tilesetUrl: '/tiles/network-old/tileset.json',
+    }))
+    expect(JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8'))).toEqual(expect.objectContaining({
+      version: 'network-old',
+    }))
+
+    await expect(repository.rollbackVersion('network-new')).resolves.toEqual(expect.objectContaining({
+      version: 'network-new',
+    }))
+    expect(JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8'))).toEqual(expect.objectContaining({
+      version: 'network-new',
+    }))
+  })
+
+  it('ignores non-version directories when listing prepared versions', async () => {
+    const outputRoot = await makeTempDir('qp3d-api-version-list-')
+    await writePreparedVersion(outputRoot, 'network-ready')
+    await mkdir(join(outputRoot, 'misc'), { recursive: true })
+
+    const repository = createPostgisRepository({
+      databaseUrl: 'postgres://example.invalid/qp3d',
+      lineTable: 'public.lines',
+      pointTable: 'public.points',
+      outputRoot,
+    })
+
+    await expect(repository.listVersions()).resolves.toEqual([
+      expect.objectContaining({ version: 'network-ready', status: 'ready' }),
+    ])
+  })
 })
 
 async function makeTempDir(prefix: string): Promise<string> {
   const path = join(tmpdir(), `${prefix}${randomUUID()}`)
   await mkdir(path, { recursive: true })
   return path
+}
+
+async function writePreparedVersion(outputRoot: string, version: string): Promise<void> {
+  const versionRoot = join(outputRoot, version)
+  await mkdir(versionRoot, { recursive: true })
+  await writeFile(join(versionRoot, 'tileset.json'), '{}')
+  await writeFile(join(versionRoot, 'root.glb'), 'glb')
+  await writeFile(join(versionRoot, 'quality-report.json'), '{}')
+  await writeFile(join(versionRoot, 'version-record.json'), JSON.stringify({
+    version,
+    status: 'ready',
+    tilesetUrl: `/tiles/${version}/tileset.json`,
+    metadataUrl: `/tiles/${version}/metadata.json`,
+    qualityReportUrl: `/tiles/${version}/quality-report.json`,
+    createdAt: '2026-06-23T00:00:00.000Z',
+    updatedAt: '2026-06-23T00:00:00.000Z',
+  }))
 }

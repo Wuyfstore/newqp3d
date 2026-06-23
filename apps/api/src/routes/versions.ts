@@ -3,6 +3,10 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { ApiRepository } from '../server.js'
 
 export async function registerVersionRoutes(app: FastifyInstance, repository: ApiRepository): Promise<void> {
+  app.get('/api/versions', async () => {
+    return { versions: await repository.listVersions() }
+  })
+
   app.get('/api/versions/latest', async (_request, reply) => {
     const latest = await repository.getLatestVersion()
 
@@ -56,6 +60,36 @@ export async function registerVersionRoutes(app: FastifyInstance, repository: Ap
     }
 
     return report
+  })
+
+  app.post('/api/versions/:version/publish', async (request, reply) => {
+    const { version } = request.params as { version: string }
+    const safeVersion = parseVersionParam(version, reply)
+    if (safeVersion == null) {
+      return reply
+    }
+
+    const manifest = await repository.publishVersion(safeVersion)
+    if (manifest == null) {
+      return reply.code(404).send({ error: 'Version not found' })
+    }
+
+    return manifest
+  })
+
+  app.post('/api/versions/:version/rollback', async (request, reply) => {
+    const { version } = request.params as { version: string }
+    const safeVersion = parseVersionParam(version, reply)
+    if (safeVersion == null) {
+      return reply
+    }
+
+    const manifest = await repository.rollbackVersion(safeVersion)
+    if (manifest == null) {
+      return reply.code(404).send({ error: 'Version not found' })
+    }
+
+    return manifest
   })
 }
 

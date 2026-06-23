@@ -88,6 +88,52 @@ describe('api client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/versions/network%2Fg9/adaptation-report')
   })
 
+  it('lists, publishes, and rolls back build versions', async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/versions') && init == null) {
+        return new Response(JSON.stringify({
+          versions: [
+            { version: 'network-new', status: 'ready', tilesetUrl: '/tiles/network-new/tileset.json' },
+          ],
+        }))
+      }
+
+      return new Response(JSON.stringify({
+        version: url.includes('rollback') ? 'network-old' : 'network-new',
+        tilesetUrl: url.includes('rollback')
+          ? '/tiles/network-old/tileset.json'
+          : '/tiles/network-new/tileset.json',
+        metadataUrl: '/tiles/metadata.json',
+        qualityReportUrl: '/tiles/quality-report.json',
+      }))
+    })
+    const api = createApiClient('/api', fetcher)
+
+    await expect(api.listVersions()).resolves.toMatchObject([
+      { version: 'network-new', status: 'ready' },
+    ])
+    await expect(api.publishVersion('network-new')).resolves.toMatchObject({
+      version: 'network-new',
+      tilesetUrl: '/tiles/network-new/tileset.json',
+    })
+    await expect(api.rollbackVersion('network-old')).resolves.toMatchObject({
+      version: 'network-old',
+      tilesetUrl: '/tiles/network-old/tileset.json',
+    })
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/versions')
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/versions/network-new/publish', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/versions/network-old/rollback', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+  })
+
   it('loads datasource discovery data and saves build templates', async () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/datasource/schemas')) {

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import pg from 'pg'
@@ -27,6 +27,20 @@ export interface LatestManifest {
   tilesetUrl: string
   metadataUrl: string
   qualityReportUrl: string
+  adaptationReportUrl?: string
+  flowTilesetUrl?: string
+  flowMode?: 'embedded'
+}
+
+type VersionRecordStatus = 'ready' | 'published' | 'superseded'
+
+interface VersionRecord extends LatestManifest {
+  status: VersionRecordStatus
+  createdAt: string
+  updatedAt: string
+  templateId?: string
+  templateVersion?: string
+  buildTaskId?: string
 }
 
 interface SearchRow {
@@ -181,6 +195,10 @@ export function createPostgisRepository(options: PostgisRepositoryOptions): ApiR
       return readVersionReport(options.outputRoot, latest.version, 'quality-report.json')
     },
 
+    async listVersions() {
+      return listVersionRecords(options.outputRoot)
+    },
+
     async getVersion(version) {
       const latest = await readJson<LatestManifest>(join(options.outputRoot, 'latest.json'))
       if (latest?.version === version) {
@@ -188,18 +206,12 @@ export function createPostgisRepository(options: PostgisRepositoryOptions): ApiR
       }
 
       const safeVersion = validateVersionId(version)
-      const qualityReport = await readJson(join(options.outputRoot, safeVersion, 'quality-report.json'))
-      if (qualityReport == null) {
+      const record = await readJson<VersionRecord>(join(options.outputRoot, safeVersion, 'version-record.json'))
+      if (record == null) {
         return null
       }
 
-      return {
-        version: safeVersion,
-        tilesetUrl: `/tiles/${safeVersion}/tileset.json`,
-        metadataUrl: `/tiles/${safeVersion}/metadata.json`,
-        qualityReportUrl: `/tiles/${safeVersion}/quality-report.json`,
-        adaptationReportUrl: `/tiles/${safeVersion}/adaptation-report.json`,
-      }
+      return latestFromRecord(record)
     },
 
     async getQualityReport(version) {
@@ -208,6 +220,14 @@ export function createPostgisRepository(options: PostgisRepositoryOptions): ApiR
 
     async getAdaptationReport(version) {
       return readVersionReport(options.outputRoot, version, 'adaptation-report.json')
+    },
+
+    async publishVersion(version) {
+      return publishPreparedVersion(options.outputRoot, version)
+    },
+
+    async rollbackVersion(version) {
+      return publishPreparedVersion(options.outputRoot, version)
     },
 
     async listSchemas() {
@@ -268,6 +288,92 @@ function validateVersionId(version: string): string {
 
 async function readVersionReport(outputRoot: string, version: string, fileName: string): Promise<unknown | null> {
   return readJson(join(outputRoot, validateVersionId(version), fileName))
+}
+
+async function listVersionRecords(outputRoot: string): Promise<VersionRecord[]> {
+  let entries: string[]
+  try {
+    entries = await readdir(outputRoot)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return []
+    }
+
+    throw error
+  }
+
+  const records = await Promise.all(entries
+    .filter(entry => !entry.startsWith('.') && entry !== 'latest.json')
+    .map(async entry => {
+      try {
+        return await readJson<VersionRecord>(join(outputRoot, validateVersionId(entry), 'version-record.json'))
+      } catch {
+        return null
+      }
+    }))
+
+  return records
+    .filter((record): record is VersionRecord => record != null)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+}
+
+async function publishPreparedVersion(outputRoot: string, version: string): Promise<LatestManifest | null> {
+  const safeVersion = validateVersionId(version)
+  const versionRoot = join(outputRoot, safeVersion)
+  const record = await readJson<VersionRecord>(join(versionRoot, 'version-record.json'))
+  if (record == null) {
+    return null
+  }
+
+  await validatePreparedVersion(versionRoot)
+  const latest = latestFromRecord(record)
+  const publishedRecord = markRecord(record, 'published')
+  await writeFile(join(versionRoot, 'version-record.json'), `${JSON.stringify(publishedRecord, null, 2)}\n`)
+  await markOtherPublishedRecordsSuperseded(outputRoot, safeVersion)
+  await writeFile(join(outputRoot, 'latest.json'), `${JSON.stringify(latest, null, 2)}\n`)
+  return latest
+}
+
+async function validatePreparedVersion(versionRoot: string): Promise<void> {
+  for (const fileName of ['tileset.json', 'root.glb', 'quality-report.json', 'version-record.json']) {
+    const result = await stat(join(versionRoot, fileName))
+    if (!result.isFile()) {
+      throw new Error(`Missing required version file: ${fileName}`)
+    }
+  }
+}
+
+function latestFromRecord(record: VersionRecord): LatestManifest {
+  return {
+    version: record.version,
+    tilesetUrl: record.tilesetUrl,
+    metadataUrl: record.metadataUrl,
+    qualityReportUrl: record.qualityReportUrl,
+    ...(record.adaptationReportUrl === undefined ? {} : { adaptationReportUrl: record.adaptationReportUrl }),
+    ...(record.flowTilesetUrl === undefined ? {} : { flowTilesetUrl: record.flowTilesetUrl }),
+    ...(record.flowMode === undefined ? {} : { flowMode: record.flowMode }),
+  }
+}
+
+function markRecord(record: VersionRecord, status: VersionRecordStatus): VersionRecord {
+  return {
+    ...record,
+    status,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+async function markOtherPublishedRecordsSuperseded(outputRoot: string, publishedVersion: string): Promise<void> {
+  const records = await listVersionRecords(outputRoot)
+  await Promise.all(records
+    .filter(record => record.version !== publishedVersion && record.status === 'published')
+    .map(async record => {
+      const next = markRecord(record, 'superseded')
+      await writeFile(
+        join(outputRoot, record.version, 'version-record.json'),
+        `${JSON.stringify(next, null, 2)}\n`,
+      )
+    }))
 }
 
 export function createSearchResult(row: SearchRow): SearchResult {

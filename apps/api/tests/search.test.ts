@@ -10,6 +10,12 @@ function createRepository(overrides: Partial<ApiRepository> = {}): ApiRepository
     getPoint: async () => null,
     getLatestVersion: async () => null,
     getLatestQuality: async () => null,
+    listVersions: async () => [],
+    getVersion: async () => null,
+    getQualityReport: async () => null,
+    getAdaptationReport: async () => null,
+    publishVersion: async () => null,
+    rollbackVersion: async () => null,
     ...overrides,
   }
 }

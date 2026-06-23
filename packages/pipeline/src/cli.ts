@@ -21,7 +21,7 @@ import { createPipeMesh } from './geometry/pipeMesh.js'
 import { parseWkbGeometry } from './geometry/wkb.js'
 import { computePipeCenterHeights } from './normalize/height.js'
 import { parsePipeSpec } from './normalize/spec.js'
-import { publishVersion, validatePublishedVersion } from './publish/versionStore.js'
+import { prepareVersion, publishVersion, validatePublishedVersion } from './publish/versionStore.js'
 import { createQualityReport } from './quality/report.js'
 import { pipelineConfigFromBuildTemplate } from './templateMapping.js'
 import { writeFeatureMetadataSidecar, writeGlb } from './tiles/glbWriter.js'
@@ -209,8 +209,8 @@ async function build(options: Record<string, string | boolean>): Promise<void> {
 
   if (source === 'postgis') {
     const config = await loadPostgisBuildConfig(options, outputOption)
-    const published = await buildPostgis(config, stringOption(options, 'version'))
-    console.log(JSON.stringify(published.latest, null, 2))
+    const prepared = await buildPostgis(config, stringOption(options, 'version'))
+    console.log(JSON.stringify(prepared.record, null, 2))
     return
   }
 
@@ -295,7 +295,7 @@ export async function buildSample(outputRoot: string) {
     },
   })
 
-  return publishVersion({
+  const prepared = await prepareVersion({
     outputRoot,
     version,
     files: {
@@ -304,6 +304,10 @@ export async function buildSample(outputRoot: string) {
       'metadata.json': `${JSON.stringify(writeFeatureMetadataSidecar(metadata), null, 2)}\n`,
       'quality-report.json': `${JSON.stringify(qualityReport, null, 2)}\n`,
     },
+  })
+  return publishVersion({
+    outputRoot,
+    version: prepared.version,
   })
 }
 
@@ -396,9 +400,16 @@ export async function buildPostgisOverview(input: BuildPostgisOverviewInput) {
     qualityReportInput.sridValidation = sridValidation
   const qualityReport = createQualityReport(qualityReportInput)
 
-  return publishVersion({
+  return prepareVersion({
     outputRoot: input.outputRoot,
     version,
+    ...(input.template === undefined
+      ? {}
+      : {
+          templateId: input.template.id,
+          templateVersion: input.template.version,
+        }),
+    buildTaskId: version,
     files: {
       'tileset.json': `${JSON.stringify(tileset, null, 2)}\n`,
       'root.glb': writeGlb(createEmptyMesh(), []),

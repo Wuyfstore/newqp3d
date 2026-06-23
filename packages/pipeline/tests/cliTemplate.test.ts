@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -90,13 +90,18 @@ describe('pipeline CLI template builds', () => {
       },
     })
 
-    const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as { version: string }
+    await expect(pathExists(join(outputRoot, 'latest.json'))).resolves.toBe(false)
+    const version = await findOnlyVersion(outputRoot)
+    const versionRecord = JSON.parse(
+      await readFile(join(outputRoot, version, 'version-record.json'), 'utf8'),
+    ) as { version: string, status: string }
     const qualityReport = JSON.parse(
-      await readFile(join(outputRoot, latest.version, 'quality-report.json'), 'utf8'),
+      await readFile(join(outputRoot, versionRecord.version, 'quality-report.json'), 'utf8'),
     ) as { templateId?: string, templateVersion?: string }
-    const tileset = JSON.parse(await readFile(join(outputRoot, latest.version, 'tileset.json'), 'utf8')) as {
+    const tileset = JSON.parse(await readFile(join(outputRoot, versionRecord.version, 'tileset.json'), 'utf8')) as {
       root: { children: unknown[] }
     }
+    expect(versionRecord.status).toBe('ready')
     expect(tileset.root.children.length).toBeGreaterThan(1)
     expect(qualityReport).toMatchObject({
       templateId: template.id,
@@ -121,8 +126,12 @@ describe('pipeline CLI template builds', () => {
       JSON.stringify(template),
     ])
 
-    const latest = JSON.parse(await readFile(join(outputRoot, 'latest.json'), 'utf8')) as { version: string }
-    expect(latest.version).toBe('network-manual-template')
+    await expect(pathExists(join(outputRoot, 'latest.json'))).resolves.toBe(false)
+    const versionRecord = JSON.parse(
+      await readFile(join(outputRoot, 'network-manual-template', 'version-record.json'), 'utf8'),
+    ) as { version: string, status: string }
+    expect(versionRecord.version).toBe('network-manual-template')
+    expect(versionRecord.status).toBe('ready')
     await expect(readFile(join(outputRoot, 'network-manual-template', 'tileset.json'), 'utf8')).resolves.toContain('asset')
   })
 
@@ -165,6 +174,21 @@ function createCliTemplate(): BuildTemplate {
     radialSegments: 12,
   }
   return template
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function findOnlyVersion(outputRoot: string): Promise<string> {
+  const versions = (await readdir(outputRoot)).filter(name => name.startsWith('network-'))
+  expect(versions).toHaveLength(1)
+  return versions[0]!
 }
 
 function lineStringEwkb(coordinates: Array<[number, number]>, srid = 3857): string {

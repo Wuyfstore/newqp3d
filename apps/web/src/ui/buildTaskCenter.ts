@@ -1,4 +1,4 @@
-import type { ApiClient, BuildTask, BuildTaskStatus } from '../services/apiClient'
+import type { ApiClient, BuildTask, BuildTaskStatus, BuildVersionRecord } from '../services/apiClient'
 
 const STYLE_ID = 'qp3d-build-task-center-styles'
 
@@ -6,6 +6,7 @@ export interface BuildTaskCenterOptions {
   apiClient: ApiClient
   templateId?: string
   getTemplateId?: () => string
+  onVersionActivated?: () => void
   pollIntervalMs?: number
 }
 
@@ -19,6 +20,7 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
   installBuildTaskCenterStyles()
 
   let tasks: BuildTask[] = []
+  let versions: BuildVersionRecord[] = []
   let selectedTaskId: string | undefined
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   let disposed = false
@@ -38,7 +40,12 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     }
 
     setStatus(element, '任务加载中')
-    tasks = await options.apiClient.listBuildTasks()
+    const [nextTasks, nextVersions] = await Promise.all([
+      options.apiClient.listBuildTasks(),
+      options.apiClient.listVersions().catch(() => []),
+    ])
+    tasks = nextTasks
+    versions = nextVersions
     if (selectedTaskId == null || !tasks.some(task => task.id === selectedTaskId)) {
       selectedTaskId = tasks[0]?.id
     }
@@ -46,7 +53,7 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     if (selectedTaskId) {
       await selectTask(selectedTaskId)
     } else {
-      renderTaskDetail(element, undefined)
+      renderTaskDetail(element, undefined, versions)
     }
     setStatus(element, tasks.length === 0 ? '暂无构建任务' : '任务状态已更新')
     schedulePolling()
@@ -57,7 +64,7 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     const detail = await options.apiClient.getBuildTask(taskId)
     tasks = upsertTask(tasks, detail)
     renderTasks(element, tasks, selectedTaskId)
-    renderTaskDetail(element, detail)
+    renderTaskDetail(element, detail, versions)
   }
 
   async function createTask(): Promise<void> {
@@ -66,7 +73,7 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     tasks = upsertTask(tasks, task)
     selectedTaskId = task.id
     renderTasks(element, tasks, selectedTaskId)
-    renderTaskDetail(element, task)
+    renderTaskDetail(element, task, versions)
     setStatus(element, '构建任务已创建')
     schedulePolling()
   }
@@ -77,8 +84,36 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     tasks = upsertTask(tasks, task)
     selectedTaskId = task.id
     renderTasks(element, tasks, selectedTaskId)
-    renderTaskDetail(element, task)
+    renderTaskDetail(element, task, versions)
     setStatus(element, '任务已取消')
+  }
+
+  async function publishTaskVersion(version: string): Promise<void> {
+    setStatus(element, '版本发布中')
+    const manifest = await options.apiClient.publishVersion(version)
+    versions = await options.apiClient.listVersions().catch(() => versions)
+    const selected = selectedTaskId ? await options.apiClient.getBuildTask(selectedTaskId) : undefined
+    if (selected) {
+      tasks = upsertTask(tasks, selected)
+      renderTasks(element, tasks, selectedTaskId)
+    }
+    renderTaskDetail(element, selected, versions)
+    setStatus(element, `版本已发布: ${manifest.version}`)
+    options.onVersionActivated?.()
+  }
+
+  async function rollbackVersion(version: string): Promise<void> {
+    setStatus(element, '版本回滚中')
+    const manifest = await options.apiClient.rollbackVersion(version)
+    versions = await options.apiClient.listVersions().catch(() => versions)
+    const selected = selectedTaskId ? await options.apiClient.getBuildTask(selectedTaskId) : undefined
+    if (selected) {
+      tasks = upsertTask(tasks, selected)
+      renderTasks(element, tasks, selectedTaskId)
+    }
+    renderTaskDetail(element, selected, versions)
+    setStatus(element, `已回滚到: ${manifest.version}`)
+    options.onVersionActivated?.()
   }
 
   element.addEventListener('click', event => {
@@ -107,6 +142,20 @@ export function createBuildTaskCenter(options: BuildTaskCenterOptions): BuildTas
     if (cancelButton) {
       void cancelTask(cancelButton.dataset.buildTaskCancelId ?? '')
         .catch(error => setStatus(element, `任务取消失败: ${formatError(error)}`))
+      return
+    }
+
+    const publishButton = target.closest<HTMLElement>('[data-build-task-publish]')
+    if (publishButton) {
+      void publishTaskVersion(publishButton.dataset.buildTaskPublishId ?? '')
+        .catch(error => setStatus(element, `版本发布失败: ${formatError(error)}`))
+      return
+    }
+
+    const rollbackButton = target.closest<HTMLElement>('[data-version-rollback-id]')
+    if (rollbackButton) {
+      void rollbackVersion(rollbackButton.dataset.versionRollbackId ?? '')
+        .catch(error => setStatus(element, `版本回滚失败: ${formatError(error)}`))
     }
   })
 
@@ -196,7 +245,7 @@ function renderTasks(element: HTMLElement, tasks: BuildTask[], selectedTaskId: s
   }
 }
 
-function renderTaskDetail(element: HTMLElement, task: BuildTask | undefined): void {
+function renderTaskDetail(element: HTMLElement, task: BuildTask | undefined, versions: BuildVersionRecord[]): void {
   const detail = requireElement<HTMLElement>(element, '[data-build-task-detail]')
   detail.replaceChildren()
 
@@ -204,7 +253,7 @@ function renderTaskDetail(element: HTMLElement, task: BuildTask | undefined): vo
     const empty = document.createElement('div')
     empty.className = 'qp3d-build-task-center__empty'
     empty.textContent = '请选择任务'
-    detail.append(empty)
+    detail.append(empty, renderVersionHistory(versions))
     return
   }
 
@@ -254,6 +303,14 @@ function renderTaskDetail(element: HTMLElement, task: BuildTask | undefined): vo
   }
 
   detail.append(title, rowList)
+  if (task.status === 'completed' && task.outputVersion) {
+    const publish = document.createElement('button')
+    publish.type = 'button'
+    publish.setAttribute('data-build-task-publish', '')
+    publish.dataset.buildTaskPublishId = task.outputVersion
+    publish.textContent = '发布'
+    detail.append(publish)
+  }
   if (isActiveStatus(task.status)) {
     const cancel = document.createElement('button')
     cancel.type = 'button'
@@ -262,7 +319,45 @@ function renderTaskDetail(element: HTMLElement, task: BuildTask | undefined): vo
     cancel.textContent = '取消'
     detail.append(cancel)
   }
-  detail.append(logTitle, logs)
+  detail.append(logTitle, logs, renderVersionHistory(versions))
+}
+
+function renderVersionHistory(versions: BuildVersionRecord[]): HTMLElement {
+  const section = document.createElement('div')
+  section.className = 'qp3d-build-task-center__versions'
+
+  const title = document.createElement('div')
+  title.className = 'qp3d-build-task-center__log-title'
+  title.textContent = '版本'
+  section.append(title)
+
+  if (versions.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'qp3d-build-task-center__empty'
+    empty.textContent = '暂无版本'
+    section.append(empty)
+    return section
+  }
+
+  const list = document.createElement('div')
+  list.className = 'qp3d-build-task-center__version-list'
+  for (const version of versions.slice(0, 8)) {
+    const row = document.createElement('div')
+    row.className = 'qp3d-build-task-center__version'
+    const label = document.createElement('span')
+    label.textContent = `${version.version} · ${versionStatusLabel(version.status)}`
+    row.append(label)
+    if (version.status !== 'published') {
+      const rollback = document.createElement('button')
+      rollback.type = 'button'
+      rollback.dataset.versionRollbackId = version.version
+      rollback.textContent = '回滚'
+      row.append(rollback)
+    }
+    list.append(row)
+  }
+  section.append(list)
+  return section
 }
 
 function upsertTask(tasks: BuildTask[], task: BuildTask): BuildTask[] {
@@ -296,6 +391,17 @@ function statusLabel(status: BuildTaskStatus): string {
       return '失败'
     case 'canceled':
       return '已取消'
+  }
+}
+
+function versionStatusLabel(status: BuildVersionRecord['status']): string {
+  switch (status) {
+    case 'ready':
+      return '待发布'
+    case 'published':
+      return '当前'
+    case 'superseded':
+      return '历史'
   }
 }
 
@@ -484,6 +590,32 @@ function installBuildTaskCenterStyles(): void {
 
 .qp3d-build-task-center__logs li[data-level="warn"] {
   color: #ffd89a;
+}
+
+.qp3d-build-task-center__versions {
+  display: grid;
+  gap: 6px;
+}
+
+.qp3d-build-task-center__version-list {
+  display: grid;
+  gap: 5px;
+}
+
+.qp3d-build-task-center__version {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.qp3d-build-task-center__version span {
+  overflow-wrap: anywhere;
+}
+
+.qp3d-build-task-center__version button {
+  padding: 0 8px;
 }
 `
   document.head.append(style)

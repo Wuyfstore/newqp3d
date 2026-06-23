@@ -72,6 +72,17 @@ export interface AdaptationReport {
   [key: string]: unknown
 }
 
+export type BuildVersionStatus = 'ready' | 'published' | 'superseded'
+
+export interface BuildVersionRecord extends VersionManifest {
+  status: BuildVersionStatus
+  createdAt?: string
+  updatedAt?: string
+  templateId?: string
+  templateVersion?: string
+  buildTaskId?: string
+}
+
 export interface DataSourceSchema {
   name: string
 }
@@ -152,6 +163,9 @@ export interface ApiClient {
   getLatestQuality(): Promise<QualityReport>
   getQualityReport(version: string): Promise<QualityReport>
   getAdaptationReport(version: string): Promise<AdaptationReport>
+  listVersions(): Promise<BuildVersionRecord[]>
+  publishVersion(version: string): Promise<VersionManifest>
+  rollbackVersion(version: string): Promise<VersionManifest>
   listSchemas(): Promise<DataSourceSchema[]>
   listTables(schema: string): Promise<DataSourceTable[]>
   getTableProfile(schema: string, table: string): Promise<DataSourceTableProfile>
@@ -192,6 +206,16 @@ export function createApiClient(baseUrl: string, fetcher: ApiFetcher = input => 
     },
     getAdaptationReport(version) {
       return getJson<AdaptationReport>(fetcher, `${normalizedBaseUrl}/versions/${encodeURIComponent(version)}/adaptation-report`)
+    },
+    async listVersions() {
+      const response = await getJson<{ versions: BuildVersionRecord[] }>(fetcher, `${normalizedBaseUrl}/versions`)
+      return response.versions
+    },
+    publishVersion(version) {
+      return postJson<VersionManifest>(fetcher, `${normalizedBaseUrl}/versions/${encodeURIComponent(version)}/publish`, {})
+    },
+    rollbackVersion(version) {
+      return postJson<VersionManifest>(fetcher, `${normalizedBaseUrl}/versions/${encodeURIComponent(version)}/rollback`, {})
     },
     async listSchemas() {
       const response = await getJson<{ schemas: DataSourceSchema[] }>(fetcher, `${normalizedBaseUrl}/datasource/schemas`)

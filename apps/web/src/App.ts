@@ -69,6 +69,18 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
   let buildTaskCenter: BuildTaskCenter | undefined
   let currentBuildTemplateId = 'reference-liyang-drainage-network'
   let disposed = false
+  const reloadLatestVersion = async () => {
+    status.textContent = 'tileset: reloading'
+    const nextHandles = await loadLatestVersion(viewer, apiClient, state, status, propertyPanel)
+    if (disposed) {
+      nextHandles.destroy()
+      return
+    }
+
+    handles?.destroy()
+    handles = nextHandles
+    handles.applyState(state.snapshot())
+  }
 
   renderToolbar(shell, state, () => {
     handles?.applyState(state.snapshot())
@@ -97,6 +109,7 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
       buildTaskCenter = next
     },
     () => currentBuildTemplateId,
+    reloadLatestVersion,
   )
 
   const disposePicking = installPicking(viewer, apiClient, {
@@ -117,16 +130,7 @@ export function mountPipeNetworkApp(root: HTMLElement): PipeNetworkApp {
     },
   })
 
-  void loadLatestVersion(viewer, apiClient, state, status, propertyPanel)
-    .then(nextHandles => {
-      if (disposed) {
-        nextHandles.destroy()
-        return
-      }
-
-      handles = nextHandles
-      handles.applyState(state.snapshot())
-    })
+  void reloadLatestVersion()
     .catch((error: unknown) => {
       status.textContent = `tileset: unavailable (${formatError(error)})`
     })
@@ -152,6 +156,7 @@ function installBuildTaskCenter(
   getCenter: () => BuildTaskCenter | undefined,
   setCenter: (center: BuildTaskCenter | undefined) => void,
   getTemplateId: () => string,
+  reloadLatestVersion: () => Promise<void>,
 ): void {
   const button = requireElement<HTMLButtonElement>(shell, '[data-open-build-task-center]')
   button.addEventListener('click', () => {
@@ -165,6 +170,11 @@ function installBuildTaskCenter(
     const center = createBuildTaskCenter({
       apiClient,
       getTemplateId,
+      onVersionActivated: () => {
+        void reloadLatestVersion().catch((error: unknown) => {
+          status.textContent = `tileset: unavailable (${formatError(error)})`
+        })
+      },
     })
     setCenter(center)
     showPanel(propertyPanel, center.element)
