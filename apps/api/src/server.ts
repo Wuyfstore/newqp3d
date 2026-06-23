@@ -1,11 +1,14 @@
 import cors from '@fastify/cors'
 import Fastify from 'fastify'
 
+import { createFileTemplateStore } from './templates/fileTemplateStore.js'
 import { registerDatasourceRoutes } from './routes/datasource.js'
 import { registerDetailsRoutes } from './routes/details.js'
 import { registerQualityRoutes } from './routes/quality.js'
 import { registerSearchRoutes } from './routes/search.js'
+import { registerTemplateRoutes } from './routes/templates.js'
 import { registerVersionRoutes } from './routes/versions.js'
+import type { BuildTemplate, BuildTemplateStatus } from '@new-qp3d/shared'
 
 export interface SearchResult {
   type: 'line' | 'point'
@@ -63,11 +66,36 @@ export interface ApiRepository {
   getTableProfile(schema: string, table: string): Promise<DataSourceTableProfile>
 }
 
-export async function createServer(repository: ApiRepository) {
+export interface BuildTemplateSummary {
+  id: string
+  name: string
+  description: string
+  version: string
+  status: BuildTemplateStatus
+  dataSourceId: string
+  updatedAt: string
+}
+
+export interface BuildTemplateStore {
+  list(): Promise<BuildTemplateSummary[]>
+  get(id: string): Promise<BuildTemplate | null>
+  create(template: BuildTemplate): Promise<BuildTemplate>
+  update(id: string, template: BuildTemplate): Promise<BuildTemplate>
+  duplicate(id: string, options: { id: string; name?: string }): Promise<BuildTemplate>
+  import(template: BuildTemplate): Promise<BuildTemplate>
+}
+
+export interface CreateServerOptions {
+  templateStore?: BuildTemplateStore
+}
+
+export async function createServer(repository: ApiRepository, options: CreateServerOptions = {}) {
   const app = Fastify({ logger: false })
+  const templateStore = options.templateStore ?? createFileTemplateStore()
 
   await app.register(cors, { origin: true })
   await registerDatasourceRoutes(app, repository)
+  await registerTemplateRoutes(app, templateStore)
   await registerSearchRoutes(app, repository)
   await registerDetailsRoutes(app, repository)
   await registerVersionRoutes(app, repository)
